@@ -14,6 +14,7 @@ tags:
   - elastic
 series:
 - xenial
+- bionic
 subordinate: false
 requires:
   require-master:
