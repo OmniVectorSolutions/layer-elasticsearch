@@ -61,6 +61,12 @@ register_trigger(when='elasticsearch.version.set',
 set_flag('elasticsearch.{}'.format(ES_NODE_TYPE))
 
 
+def es_active_status():
+    status_set('active',
+               'Elasticsearch Running - {} x {} nodes'.format(
+                   len(kv.get('peer-nodes', [])) + 1, ES_NODE_TYPE))
+
+
 @when_not('swap.removed')
 def remove_swap():
     """
@@ -225,7 +231,7 @@ def ensure_elasticsearch_started():
 
     if service_running('elasticsearch'):
         set_flag('elasticsearch.init.running')
-        status_set('active', 'Elasticsearch running')
+        status_set('active', 'Elasticsearch init running')
     else:
         # If elasticsearch wont start, set blocked
         status_set('blocked',
@@ -246,15 +252,12 @@ def get_set_elasticsearch_version():
 # Elasticsearch initialization should be complete at this point
 # The following ops are all post init phase
 @when('elasticsearch.init.complete')
-@when_not('elasticsearch.transport.port.available')
-def open_transport_port():
+@when_not('elasticsearch.ports.available')
+def open_ports():
     """
-    Open port 9300 for transport protocol
+    Open port 9200 and 9300
     """
-    # TODO(jamesbeedy): Figure out a way forward here other then this...
-    # or possibly this is ok, do I even need to open port 9300
-    # if it is a best practice to not have es cross talk over wan? -
-    # for now, just open the transport port
+    open_port(ES_HTTP_PORT)
     open_port(ES_TRANSPORT_PORT)
     set_flag('elasticsearch.transport.port.available')
 
@@ -270,9 +273,7 @@ def render_init_config_for_node_type_all():
 
 @when('elasticsearch.init.config.rendered', 'elasticsearch.all')
 def node_type_all_init_complete():
-    status_set('active',
-               'Elasticsearch Running - {} nodes'.format(
-                   len(kv.get('peer-nodes', [])) + 1))
+    es_active_status()
     set_flag('elasticsearch.all.available')
 
 
@@ -342,15 +343,14 @@ def elasticsearch_node_available():
                        ES_NODE_TYPE))
         return
     else:
-        status_set('active', "{} node - Ready".format(
-            ES_NODE_TYPE.capitalize()))
+        es_active_status()
         set_flag('elasticsearch.{}.available'.format(ES_NODE_TYPE))
 
 
 # Client Relation
 @when('endpoint.client.joined',
       'elasticsearch.{}.available'.format(ES_NODE_TYPE))
-@when_not('juju.elasticsearch.client.joined')
+#@when_not('juju.elasticsearch.client.joined')
 def provide_client_relation_data():
     """
     Set client relation data.
@@ -365,11 +365,12 @@ def provide_client_relation_data():
                    "wrong node-typeforclient relation, please remove relation")
         return
     else:
+        status_set('maintenance', "Joining client relation, opening port 9200")
         open_port(ES_HTTP_PORT)
         endpoint_from_flag('endpoint.client.joined').configure(
             ES_PUBLIC_INGRESS_ADDRESS, ES_HTTP_PORT, ES_CLUSTER_NAME)
-
-    set_flag('juju.elasticsearch.client.joined')
+        es_status_active()
+#    set_flag('juju.elasticsearch.client.joined')
 
 
 # Non-Master Node Relation
