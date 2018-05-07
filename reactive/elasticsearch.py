@@ -369,7 +369,7 @@ def provide_client_relation_data():
         open_port(ES_HTTP_PORT)
         endpoint_from_flag('endpoint.client.joined').configure(
             ES_PUBLIC_INGRESS_ADDRESS, ES_HTTP_PORT, ES_CLUSTER_NAME)
-        es_status_active()
+        es_active_status()
 #    set_flag('juju.elasticsearch.client.joined')
 
 
