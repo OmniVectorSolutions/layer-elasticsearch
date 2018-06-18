@@ -39,7 +39,8 @@ from charms.layer.elasticsearch import (
     DISCOVERY_FILE_PATH,
     ES_DATA_DIR,
     ES_DEFAULT_FILE_PATH,
-    ELASTICSEARCH_YML_PATH,
+    ES_PATH_CONF,
+    ES_YML_PATH,
     ES_PUBLIC_INGRESS_ADDRESS,
     ES_CLUSTER_INGRESS_ADDRESS,
     ES_CLUSTER_NAME,
@@ -84,6 +85,11 @@ def set_elasticsearch_started_flag():
     charm code runnig until the start state has been reached.
     """
     set_flag('elasticsearch.juju.started')
+
+
+@hook('data-storage-attached')
+def set_storage_available_flag():
+    set_flag('elasticsearch.storage.available')
 
 
 @when('endpoint.member.joined')
@@ -131,12 +137,14 @@ def render_elasticsearch_yml():
 
     ctxt = \
         {'cluster_name': config('cluster-name'),
+         'num_es_nodes': len(kv.get('peer-nodes', [])) + \
+                             len(kv.get('master-nodes', [])),
          'cluster_network_ip': ES_CLUSTER_INGRESS_ADDRESS,
          'node_type': NODE_TYPE_MAP[config('node-type')],
          'custom_config': config('custom-config')}
 
     render_elasticsearch_file(
-        'elasticsearch.yml.j2', ELASTICSEARCH_YML_PATH, ctxt)
+        'elasticsearch.yml.j2', ES_YML_PATH, ctxt)
 
     if not is_flag_set('elasticsearch.init.config.rendered'):
         set_flag('elasticsearch.init.config.rendered')
@@ -146,6 +154,7 @@ def render_elasticsearch_yml():
 
 @when_any('apt.installed.elasticsearch',
           'deb.installed.elasticsearch')
+@when('elasticsearch.storage.available')
 @when_not('elasticsearch.storage.prepared')
 def prepare_es_data_dir():
     """
@@ -185,13 +194,15 @@ def render_elasticsearch_defaults():
 
 
 @when_not('elasticsearch.discovery.plugin.available')
-@when_any('deb.installed.elasticsearch', 'apt.installed.elasticsearch')
+@when_any('deb.installed.elasticsearch',
+          'apt.installed.elasticsearch')
 def install_file_based_discovery_plugin():
     """
     Install the file based discovery plugin.
     """
 
     if os.path.exists(ES_PLUGIN):
+        os.environ['ES_PATH_CONF'] = ES_PATH_CONF
         sp.call("{} install discovery-file".format(ES_PLUGIN).split())
         set_flag('elasticsearch.discovery.plugin.available')
     else:
@@ -199,6 +210,63 @@ def install_file_based_discovery_plugin():
         status_set('blocked',
                    "Cannot find elasticsearch plugin manager - "
                    "please debug {}".format(ES_PLUGIN))
+
+
+#@when('config.set.use-xpack')
+#@when_not('elasticsearch.x-pack.plugin.available')
+#@when_any('deb.installed.elasticsearch', 'apt.installed.elasticsearch')
+#def install_xpack_plugin():
+#    """
+#    Install the x-pack discovery plugin.
+#    """
+#
+#    if os.path.exists(ES_PLUGIN):
+#        sp.call("{} install x-pack --batch".format(ES_PLUGIN).split())
+#        set_flag('elasticsearch.x-pack.plugin.available')
+#    else:
+#        log("BAD THINGS - x-pack not available")
+#        status_set('blocked',
+##                   "Cannot find elasticsearch plugin manager - "
+#                   "please debug {}".format(ES_PLUGIN))
+
+        
+@when_not('elasticsearch.init.running')
+@when('elasticsearch.discovery.plugin.available',
+      'elasticsearch.storage.prepared',
+      'elasticsearch.defaults.available')
+def ensure_elasticsearch_started():
+    """
+    Ensure elasticsearch is started.
+    (this should only run once)
+    """
+
+    sp.call(["systemctl", "daemon-reload"])
+    sp.call(["systemctl", "enable", "elasticsearch.service"])
+
+    # If elasticsearch isn't running start it
+    if not service_running('elasticsearch'):
+        service_start('elasticsearch')
+    # If elasticsearch is running restart it
+    else:
+        service_restart('elasticsearch')
+
+    # Wait 100 seconds for elasticsearch to restart, then break out of the loop
+    # and blocked wil be set below
+    cnt = 0
+    while not service_running('elasticsearch') and cnt < 100:
+        status_set('waiting', 'Waiting for Elasticsearch to start')
+        sleep(1)
+        cnt += 1
+
+    if service_running('elasticsearch'):
+        set_flag('elasticsearch.init.running')
+        status_set('active', 'Elasticsearch init running')
+    else:
+        # If elasticsearch wont start, set blocked
+        status_set('blocked',
+                   "There are problems with elasticsearch, please debug")
+        return
+
 
 
 @when_not('elasticsearch.init.running')

@@ -1,4 +1,9 @@
 options:
+  use-xpack:
+    description: |
+      Install XPack on elasticsearch
+    default: true
+    type: boolean
   java-opts:
     description: Java Opts
     default: ""

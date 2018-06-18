@@ -29,16 +29,16 @@ from charmhelpers.core.host import (
 
 ES_DATA_DIR = Path('/srv/elasticsearch-data')
 
-ES_CONFIG_DIR = os.path.join('/', 'etc', 'elasticsearch')
+ES_PATH_CONF = os.path.join('/', 'etc', 'elasticsearch')
 
-ELASTICSEARCH_YML_PATH = os.path.join(ES_CONFIG_DIR, 'elasticsearch.yml')
+ES_YML_PATH = os.path.join(ES_PATH_CONF, 'elasticsearch.yml')
 
 ES_PUBLIC_INGRESS_ADDRESS = network_get('public')['ingress-addresses'][0]
 
 ES_CLUSTER_INGRESS_ADDRESS = network_get('cluster')['ingress-addresses'][0]
 
 DISCOVERY_FILE_PATH = os.path.join(
-    ES_CONFIG_DIR, 'discovery-file', 'unicast_hosts.txt')
+    ES_PATH_CONF, 'discovery-file', 'unicast_hosts.txt')
 
 ES_DEFAULT_FILE_PATH = os.path.join('/', 'etc', 'default', 'elasticsearch')
 
