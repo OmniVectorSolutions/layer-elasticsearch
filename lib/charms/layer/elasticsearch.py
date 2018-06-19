@@ -137,6 +137,12 @@ def es_version():
         log(e.message)
 
 
+def write_es_config(ctxt):
+    """Write out /etc/elasticsearch/elasticsearch.yml
+    """
+    render_elasticsearch_file('elasticsearch.yml.j2', ES_YML_PATH, ctxt)
+
+
 def render_elasticsearch_file(template, file_path, ctxt,
                               user=None, group=None):
     if not user and not group:

@@ -3,6 +3,7 @@
 import os
 import subprocess as sp
 from time import sleep
+from pathlib import Path
 
 from charms.reactive import (
     clear_flag,
@@ -25,6 +26,7 @@ from charmhelpers.core.hookenv import (
 from charmhelpers.core.host import (
     chownr,
     service_restart,
+    service_reload,
     service_running,
     service_start,
     fstab_remove
@@ -36,6 +38,7 @@ from charms.layer.elasticsearch import (
     # pylint: disable=E0611,E0401,C0412
     es_version,
     render_elasticsearch_file,
+    write_es_config,
     DISCOVERY_FILE_PATH,
     ES_DATA_DIR,
     ES_DEFAULT_FILE_PATH,
@@ -92,64 +95,26 @@ def set_storage_available_flag():
     set_flag('elasticsearch.storage.available')
 
 
-@when('endpoint.member.joined')
-def update_unitdata_kv():
+@when_any('apt.installed.elasticsearch',
+          'deb.installed.elasticsearch')
+@when_not('elasticsearch.http.port.available')
+def open_http_port():
     """
-    This handler is ran when ever a peer is joined.
-    (all node types use this handler to coordinate peers)
+    Open port 9200
     """
-
-    peers = endpoint_from_flag('endpoint.member.joined').all_units
-    if len(peers) > 0 and \
-       len([peer._data['private-address']
-            for peer in peers if peer._data is not None]) > 0:
-        kv.set('peer-nodes',
-               [peer._data['private-address']
-                for peer in peers if peer._data is not None])
-        set_flag('render.elasticsearch.unicast-hosts')
+    open_port(ES_HTTP_PORT)
+    set_flag('elasticsearch.http.port.available')
 
 
-@when('render.elasticsearch.unicast-hosts',
-      'elasticsearch.discovery.plugin.available')
-def update_discovery_file():
+@when_any('apt.installed.elasticsearch',
+          'deb.installed.elasticsearch')
+@when_not('elasticsearch.transport.port.available')
+def open_transport_port():
     """
-    Update discovery-file
+    Open port 9300
     """
-
-    nodes = []
-
-    if is_flag_set('elasticsearch.all') or is_flag_set('elasticsearch.master'):
-        nodes = kv.get('peer-nodes', [])
-    else:
-        nodes = kv.get('master-nodes', []) + kv.get('peer-nodes', [])
-
-    render_elasticsearch_file(
-        'unicast_hosts.txt.j2', DISCOVERY_FILE_PATH, {'nodes': nodes})
-
-    clear_flag('render.elasticsearch.unicast-hosts')
-
-
-@when('render.elasticsearch.yml')
-def render_elasticsearch_yml():
-    """
-    Render /etc/elasticsearch/elasticsearch.yml
-    """
-
-    ctxt = \
-        {'cluster_name': config('cluster-name'),
-         'num_es_nodes': len(kv.get('peer-nodes', [])) + \
-                             len(kv.get('master-nodes', [])),
-         'cluster_network_ip': ES_CLUSTER_INGRESS_ADDRESS,
-         'node_type': NODE_TYPE_MAP[config('node-type')],
-         'custom_config': config('custom-config')}
-
-    render_elasticsearch_file(
-        'elasticsearch.yml.j2', ES_YML_PATH, ctxt)
-
-    if not is_flag_set('elasticsearch.init.config.rendered'):
-        set_flag('elasticsearch.init.config.rendered')
-    service_restart('elasticsearch')
-    clear_flag('render.elasticsearch.yml')
+    open_port(ES_TRANSPORT_PORT)
+    set_flag('elasticsearch.transport.port.available')
 
 
 @when_any('apt.installed.elasticsearch',
@@ -169,6 +134,86 @@ def prepare_es_data_dir():
            chowntopdir=True)
 
     set_flag('elasticsearch.storage.prepared')
+
+
+@when_not('elasticsearch.discovery.plugin.available')
+@when_any('deb.installed.elasticsearch',
+          'apt.installed.elasticsearch')
+@when('elasticsearch.juju.started')
+def install_file_based_discovery_plugin():
+    """
+    Install the file based discovery plugin.
+    """
+
+    if os.path.exists(ES_PLUGIN):
+        os.environ['ES_PATH_CONF'] = ES_PATH_CONF
+        sp.call("{} install discovery-file".format(ES_PLUGIN).split())
+        render_elasticsearch_file(
+            'unicast_hosts.txt.j2', DISCOVERY_FILE_PATH, {'nodes': []})
+        set_flag('elasticsearch.discovery.plugin.available')
+    else:
+        log("BAD THINGS - elasticsearch-plugin not available")
+        status_set('blocked',
+                   "Cannot find elasticsearch plugin manager - "
+                   "please debug {}".format(ES_PLUGIN))
+
+
+@when('elasticsearch.discovery.plugin.available',
+      'elasticsearch.juju.started',
+      'elasticsearch.storage.prepared')
+@when_not('elasticsearch.init.config.available')
+def init_render_elasticsearch_yml():
+    """
+    Render inital /etc/elasticsearch/elasticsearch.yml
+    """
+    ctxt = \
+        {'cluster_name': config('cluster-name'),
+         'cluster_network_ip': ES_CLUSTER_INGRESS_ADDRESS,
+         'node_type': NODE_TYPE_MAP[config('node-type')],
+         'custom_config': config('custom-config')}
+
+    write_es_config(ctxt)
+    #service_restart('elasticsearch')
+    set_flag('elasticsearch.init.config.available')
+
+
+@when('render.elasticsearch.unicast-hosts',
+      'elasticsearch.discovery.plugin.available',
+      'elasticsearch.init.complete')
+def update_discovery_file():
+    """
+    Update discovery-file
+    """
+
+    nodes = []
+
+    if is_flag_set('elasticsearch.all') or is_flag_set('elasticsearch.master'):
+        nodes = kv.get('peer-nodes', [])
+    else:
+        nodes = kv.get('master-nodes', []) + kv.get('peer-nodes', [])
+
+    render_elasticsearch_file(
+        'unicast_hosts.txt.j2', DISCOVERY_FILE_PATH, {'nodes': nodes})
+
+    clear_flag('render.elasticsearch.unicast-hosts')
+
+
+#@when('config.set.use-xpack')
+#@when_not('elasticsearch.x-pack.plugin.available')
+#@when_any('deb.installed.elasticsearch', 'apt.installed.elasticsearch')
+#def install_xpack_plugin():
+#    """
+#    Install the x-pack discovery plugin.
+#    """
+#
+#    if os.path.exists(ES_PLUGIN):
+#        sp.call("{} install x-pack --batch".format(ES_PLUGIN).split())
+#        set_flag('elasticsearch.x-pack.plugin.available')
+#    else:
+#        log("BAD THINGS - x-pack not available")
+#        status_set('blocked',
+##                   "Cannot find elasticsearch plugin manager - "
+#                   "please debug {}".format(ES_PLUGIN))
 
 
 @when_any('apt.installed.elasticsearch',
@@ -193,46 +238,10 @@ def render_elasticsearch_defaults():
     status_set('active', "Elasticsearch defaults available")
 
 
-@when_not('elasticsearch.discovery.plugin.available')
-@when_any('deb.installed.elasticsearch',
-          'apt.installed.elasticsearch')
-def install_file_based_discovery_plugin():
-    """
-    Install the file based discovery plugin.
-    """
-
-    if os.path.exists(ES_PLUGIN):
-        os.environ['ES_PATH_CONF'] = ES_PATH_CONF
-        sp.call("{} install discovery-file".format(ES_PLUGIN).split())
-        set_flag('elasticsearch.discovery.plugin.available')
-    else:
-        log("BAD THINGS - elasticsearch-plugin not available")
-        status_set('blocked',
-                   "Cannot find elasticsearch plugin manager - "
-                   "please debug {}".format(ES_PLUGIN))
-
-
-#@when('config.set.use-xpack')
-#@when_not('elasticsearch.x-pack.plugin.available')
-#@when_any('deb.installed.elasticsearch', 'apt.installed.elasticsearch')
-#def install_xpack_plugin():
-#    """
-#    Install the x-pack discovery plugin.
-#    """
-#
-#    if os.path.exists(ES_PLUGIN):
-#        sp.call("{} install x-pack --batch".format(ES_PLUGIN).split())
-#        set_flag('elasticsearch.x-pack.plugin.available')
-#    else:
-#        log("BAD THINGS - x-pack not available")
-#        status_set('blocked',
-##                   "Cannot find elasticsearch plugin manager - "
-#                   "please debug {}".format(ES_PLUGIN))
-
-        
 @when_not('elasticsearch.init.running')
-@when('elasticsearch.discovery.plugin.available',
-      'elasticsearch.storage.prepared',
+@when('elasticsearch.init.config.available',
+      'elasticsearch.http.port.available',
+      'elasticsearch.transport.port.available',
       'elasticsearch.defaults.available')
 def ensure_elasticsearch_started():
     """
@@ -248,46 +257,7 @@ def ensure_elasticsearch_started():
         service_start('elasticsearch')
     # If elasticsearch is running restart it
     else:
-        service_restart('elasticsearch')
-
-    # Wait 100 seconds for elasticsearch to restart, then break out of the loop
-    # and blocked wil be set below
-    cnt = 0
-    while not service_running('elasticsearch') and cnt < 100:
-        status_set('waiting', 'Waiting for Elasticsearch to start')
-        sleep(1)
-        cnt += 1
-
-    if service_running('elasticsearch'):
-        set_flag('elasticsearch.init.running')
-        status_set('active', 'Elasticsearch init running')
-    else:
-        # If elasticsearch wont start, set blocked
-        status_set('blocked',
-                   "There are problems with elasticsearch, please debug")
-        return
-
-
-
-@when_not('elasticsearch.init.running')
-@when('elasticsearch.discovery.plugin.available',
-      'elasticsearch.storage.prepared',
-      'elasticsearch.defaults.available')
-def ensure_elasticsearch_started():
-    """
-    Ensure elasticsearch is started.
-    (this should only run once)
-    """
-
-    sp.call(["systemctl", "daemon-reload"])
-    sp.call(["systemctl", "enable", "elasticsearch.service"])
-
-    # If elasticsearch isn't running start it
-    if not service_running('elasticsearch'):
-        service_start('elasticsearch')
-    # If elasticsearch is running restart it
-    else:
-        service_restart('elasticsearch')
+        sp.call('service elasticsearch restart'.split())
 
     # Wait 100 seconds for elasticsearch to restart, then break out of the loop
     # and blocked wil be set below
@@ -317,32 +287,33 @@ def get_set_elasticsearch_version():
     set_flag('elasticsearch.version.set')
 
 
-# Elasticsearch initialization should be complete at this point
-# The following ops are all post init phase
-@when('elasticsearch.init.complete')
-@when_not('elasticsearch.ports.available')
-def open_ports():
-    """
-    Open port 9200 and 9300
-    """
-    open_port(ES_HTTP_PORT)
-    open_port(ES_TRANSPORT_PORT)
-    set_flag('elasticsearch.transport.port.available')
-
-
-# Node-Type ALL Handlers
-@when('elasticsearch.transport.port.available',
-      'elasticsearch.all',
-      'elasticsearch.juju.started')
-@when_not('elasticsearch.init.config.rendered')
-def render_init_config_for_node_type_all():
-    set_flag('render.elasticsearch.yml')
-
-
-@when('elasticsearch.init.config.rendered', 'elasticsearch.all')
+@when('elasticsearch.init.complete',
+      'elasticsearch.transport.port.available',
+      'elasticsearch.http.port.available',
+      'elasticsearch.all')
 def node_type_all_init_complete():
     es_active_status()
     set_flag('elasticsearch.all.available')
+
+
+# Elasticsearch initialization should be complete at this point
+# The following ops are all post init phase
+
+
+# Peer relation handler
+@when('endpoint.member.joined')
+def update_unitdata_kv():
+    """
+    This handler is ran when ever a peer is joined.
+    (all node types use this handler to coordinate peers)
+    """
+
+    peers = endpoint_from_flag('endpoint.member.joined').all_units
+    ready_peers = [peer._data['private-address']
+                   for peer in peers if peer._data is not None]
+    if len(ready_peers) > 0:
+        kv.set('peer-nodes', ready_peers) 
+        set_flag('render.elasticsearch.unicast-hosts')
 
 
 # Node-Type Tribe/Ingest/Data Handlers
@@ -383,12 +354,12 @@ def block_until_min_masters():
 @when_any('elasticsearch.min.masters.available',
           'elasticsearch.master.acquired')
 @when('elasticsearch.transport.port.available')
-@when_not('elasticsearch.init.config.rendered')
+@when_not('elasticsearch.init.config.available')
 def render_elasticsearch_yml_init():
     set_flag('render.elasticsearch.yml')
 
 
-@when('elasticsearch.init.config.rendered')
+@when('elasticsearch.init.config.available')
 @when_not('elasticsearch.all')
 def elasticsearch_node_available():
     """
