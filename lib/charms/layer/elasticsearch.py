@@ -150,7 +150,7 @@ def render_elasticsearch_file(template, file_path, ctxt,
         group = group
 
     # Remove file if exists
-    if os.path.exists(file_path):
+    if os.path.exists(file_path) and file_path != DISCOVERY_FILE_PATH:
         os.remove(file_path)
 
     # Spew rendered template into file
