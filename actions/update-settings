@@ -1,0 +1,60 @@
+#!/usr/local/sbin/charm-env python
+
+import json
+import sys
+import urllib3
+
+from charmhelpers.core import hookenv
+
+
+def update_cluster_global_settings(settings):
+    """Update the cluster global settings
+    """
+    ctxt = {'headers': {'Content-Type': 'application/json'},
+            'method': 'PUT',
+            'url': "http://localhost:9200/_cluster/settings",
+            'body': settings,
+    }
+
+    http = urllib3.PoolManager()
+    r = http.request(**ctxt)
+    return r.data.decode()
+
+
+def update_index_settings(index, settings):
+    """Update the cluster global settings
+    """
+    ctxt = {'headers': {'Content-Type': 'application/json'},
+            'method': 'PUT',
+            'url': "http://localhost:9200/{}/_settings".format(index),
+            'body': settings,
+    }
+
+    http = urllib3.PoolManager()
+    r = http.request(**ctxt)
+    return r.data.decode()
+
+
+def get_indices():
+    ctxt = {'headers': {'Content-Type': 'application/json'},
+            'method': 'GET',
+            'url': "http://localhost:9200/_cat/indices?h=index"
+    }
+    http = urllib3.PoolManager()
+    r = http.request(**ctxt)
+    return r.data.decode().split()
+
+
+if __name__ == "__main__":
+    index = hookenv.action_get('index-name')
+    settings_json = hookenv.action_get('settings-json')
+
+    if index == "*":
+        for i in get_indices().split():
+            result = update_index_settings(i, settings_json)
+    elif index == "cluster":
+        result = update_cluster_global_settings(settings_json)
+    else:
+        result = update_index_settings(index, settings_json)
+
+    hookenv.status_set('active', "Settings update complete")

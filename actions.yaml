@@ -1,0 +1,11 @@
+update-settings: 
+  description: Update elasticsearch settings
+  params:
+    settings-json: 
+      type: string
+      description: |
+        JSON string of the json settings file
+    index-name:
+      type: string
+      description: |
+        The index name to preform the settings on, "*" for all indices, "cluster" for cluster settings.
