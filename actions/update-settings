@@ -54,13 +54,13 @@ def get_indices():
 
 if __name__ == "__main__":
     index = action_get('index-name')
-
+    settings_json = b64decode(action_get('settings-json'))
     try:
-        settings_json = json.loads(b64decode(action_get('settings-json')))
-    except json.JSONDecodeError("Invalid JSON", settings_json) as e:
-        action_set({'settings-update-result': e.msg})
-        action_fail()
-        sys.exit(1)
+        settings_json = json.loads(settings_json)
+    except json.JSONDecodeError:
+        msg = "INVALID JSON"
+        action_set({'settings-update-result': msg})
+        action_fail(msg)
 
     if index == "*":
         for i in get_indices().split():
