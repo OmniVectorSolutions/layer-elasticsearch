@@ -4,7 +4,14 @@ import json
 import sys
 import urllib3
 
-from charmhelpers.core import hookenv
+from base64 import b64decode
+
+from charmhelpers.core.hookenv import (
+    action_fail,
+    action_get,
+    action_set,
+    status_set,
+)
 
 
 def update_cluster_global_settings(settings):
@@ -13,7 +20,7 @@ def update_cluster_global_settings(settings):
     ctxt = {'headers': {'Content-Type': 'application/json'},
             'method': 'PUT',
             'url': "http://localhost:9200/_cluster/settings",
-            'body': settings,
+            'body': json.dumps(settings),
     }
 
     http = urllib3.PoolManager()
@@ -27,7 +34,7 @@ def update_index_settings(index, settings):
     ctxt = {'headers': {'Content-Type': 'application/json'},
             'method': 'PUT',
             'url': "http://localhost:9200/{}/_settings".format(index),
-            'body': settings,
+            'body': json.dumps(settings),
     }
 
     http = urllib3.PoolManager()
@@ -46,15 +53,24 @@ def get_indices():
 
 
 if __name__ == "__main__":
-    index = hookenv.action_get('index-name')
-    settings_json = hookenv.action_get('settings-json')
+    index = action_get('index-name')
+
+    try:
+        settings_json = json.loads(b64decode(action_get('settings-json')))
+    except json.JSONDecodeError("Invalid JSON", settings_json) as e:
+        action_set({'settings-update-result': e.msg})
+        action_fail()
+        sys.exit(1)
 
     if index == "*":
         for i in get_indices().split():
             result = update_index_settings(i, settings_json)
+            action_set({'settings-update-{}'.format(i): result})
     elif index == "cluster":
         result = update_cluster_global_settings(settings_json)
+        action_set({'settings-update-{}'.format(index): result})
     else:
         result = update_index_settings(index, settings_json)
+        action_set({'settings-update-{}'.format(index): result})
 
-    hookenv.status_set('active', "Settings update complete")
+    status_set('active', "Settings update complete")
