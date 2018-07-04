@@ -4,8 +4,9 @@ update-settings:
     settings-json: 
       type: string
       description: |
-        JSON string of the json settings file
+        Base64 encoded JSON string of the json settings file to apply. Specified as "$(cat data.json | base64)".
     index-name:
       type: string
       description: |
-        The index name to preform the settings on, "*" for all indices, "cluster" for cluster settings.
+        The index name to preform the settings modification on.
+        "*" for all indices, "cluster" for cluster settings, or "<index-name>"

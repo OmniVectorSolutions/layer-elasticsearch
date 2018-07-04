@@ -29,7 +29,7 @@ def update_cluster_global_settings(settings):
 
 
 def update_index_settings(index, settings):
-    """Update the cluster global settings
+    """Update the settings for an index
     """
     ctxt = {'headers': {'Content-Type': 'application/json'},
             'method': 'PUT',
@@ -43,6 +43,8 @@ def update_index_settings(index, settings):
 
 
 def get_indices():
+    """Return a list of indices
+    """
     ctxt = {'headers': {'Content-Type': 'application/json'},
             'method': 'GET',
             'url': "http://localhost:9200/_cat/indices?h=index"
