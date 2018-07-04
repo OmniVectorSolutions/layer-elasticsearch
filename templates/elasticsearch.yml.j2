@@ -6,9 +6,9 @@ cluster.name: {{ cluster_name }}
 http.port: 9200
 network.bind_host: ["_global_", "_site_", "_local_"]
 network.publish_host: ["{{ cluster_network_ip }}"]
-{% if num_es_nodes >= 1 %}
+
 discovery.zen.hosts_provider: file
-{% endif %}
+
 path.logs: /var/log/elasticsearch
 path.data: /srv/elasticsearch-data
 
