@@ -26,6 +26,13 @@ from charmhelpers.core.host import (
     service_restart
 )
 
+from charms.layer import options
+
+
+if options.get('basic', 'use_venv'):
+    PIP = os.path.join('../.venv', 'bin', 'pip')
+else:
+    PIP = 'pip3'
 
 ES_DATA_DIR = Path('/srv/elasticsearch-data')
 
@@ -52,6 +59,7 @@ ES_TRANSPORT_PORT = 9300
 
 ES_PLUGIN = os.path.join(
     '/', 'usr', 'share', 'elasticsearch', 'bin', 'elasticsearch-plugin')
+
 
 MASTER_NODE_CONFIG = """
 node.master: true
