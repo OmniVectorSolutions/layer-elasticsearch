@@ -47,7 +47,8 @@ from charms.layer.elasticsearch import (
     ES_HTTP_PORT,
     ES_TRANSPORT_PORT,
     ES_PLUGIN,
-    NODE_TYPE_MAP
+    NODE_TYPE_MAP,
+    PIP,
 )
 
 
@@ -216,8 +217,9 @@ def ensure_elasticsearch_started():
         cnt += 1
 
     if service_running('elasticsearch'):
-        set_flag('elasticsearch.init.running')
+        kv.set('es_version', es_version())
         status_set('active', 'Elasticsearch init running')
+        set_flag('elasticsearch.init.running')
     else:
         # If elasticsearch wont start, set blocked
         status_set('blocked',
@@ -231,9 +233,18 @@ def get_set_elasticsearch_version():
     """
     Set Elasticsearch version.
     """
-    application_version_set(es_version())
+    application_version_set(kv.get('es_version'))
     set_flag('elasticsearch.version.set')
     set_flag('elasticsearch.init.complete')
+
+
+@when('elasticsearch.version.set')
+@when_not('pip.elasticsearch.installed')
+def install_elasticsearch_pip_dep():
+    status_set('maintenance', "Installing Elasticsearch python client.")
+    sp.call([PIP, 'install', 'elasticsearch>={}'.format(kv.get('es_version'))])
+    status_set('active', "Elasticsearch python client installed.")
+    set_flag('pip.elasticsearch.installed')
 
 
 @when('endpoint.member.joined')
@@ -398,3 +409,11 @@ def provide_master_node_type_relation_data():
     else:
         endpoint_from_flag('endpoint.provide-master.joined').configure(
             ES_CLUSTER_INGRESS_ADDRESS, ES_TRANSPORT_PORT, ES_CLUSTER_NAME)
+
+
+@when('endpoint.datadog-integration.available')
+@when_not('datadog.integration.relation.info.set')
+def set_datadog_integration_relation_info():
+    endpoint = endpoint_from_flag('endpoint.datadog-integration.available')
+    endpoint.configure(integration_name='elastic')
+    set_flag('datadog.integration.relation.info.set')
