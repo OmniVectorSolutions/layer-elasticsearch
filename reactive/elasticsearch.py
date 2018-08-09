@@ -387,9 +387,9 @@ def provide_client_relation_data():
 def get_all_master_nodes():
     master_nodes = []
 
-    for es in endpoint_from_flag(
-       'endpoint.require-master.available').relation_data():
-            master_nodes.append(es['host'])
+    for es in reactive.endpoint_from_flag(
+       'endpoint.elasticsearch.available').list_unit_data():
+            master_nodes.append("{}:{}".format(es['host'], es['port']))
 
     kv.set('master-nodes', master_nodes)
 
