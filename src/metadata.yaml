@@ -1,4 +1,5 @@
 name: elasticsearch
+display-name: Elasticsearch
 summary: Open Source, Distributed, RESTful Search Engine
 maintainer: James Beedy <jamesbeedy@gmail.com>
 description: |

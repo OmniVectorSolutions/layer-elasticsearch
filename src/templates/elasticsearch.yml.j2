@@ -4,7 +4,7 @@
 
 cluster.name: {{ cluster_name }}
 http.port: 9200
-network.bind_host: ["_global_", "_site_", "_local_"]
+network.host: ["0.0.0.0"]
 network.publish_host: ["{{ cluster_network_ip }}"]
 
 discovery.zen.hosts_provider: file

@@ -161,6 +161,24 @@ def render_elasticsearch_defaults():
 
 
 @when('elastic.base.available')
+@when_not('elasticsearch.repository-s3.plugin.available')
+def install_repository_s3_plugin():
+    """
+    Install the repository-s3 plugin.
+    """
+
+    if os.path.exists(ES_PLUGIN):
+        os.environ['ES_PATH_CONF'] = ES_PATH_CONF
+        sp.call("{} install repository-s3".format(ES_PLUGIN).split())
+        set_flag('elasticsearch.repository-s3.plugin.available')
+    else:
+        log("BAD THINGS - elasticsearch-plugin not available")
+        status_set('blocked',
+                   "Cannot find elasticsearch plugin manager - "
+                   "please debug {}".format(ES_PLUGIN))
+
+
+@when('elastic.base.available')
 @when_not('elasticsearch.discovery.plugin.available')
 def install_file_based_discovery_plugin():
     """
@@ -178,7 +196,8 @@ def install_file_based_discovery_plugin():
                    "please debug {}".format(ES_PLUGIN))
 
 
-@when('elasticsearch.discovery.plugin.available',
+@when('elasticsearch.repository-s3.plugin.available',
+      'elasticsearch.discovery.plugin.available',
       'elasticsearch.defaults.available',
       'elasticsearch.ports.available',
       'elasticsearch.juju.started',
@@ -217,7 +236,6 @@ def ensure_elasticsearch_started():
         cnt += 1
 
     if service_running('elasticsearch'):
-        kv.set('es_version', es_version())
         status_set('active', 'Elasticsearch init running')
         set_flag('elasticsearch.init.running')
     else:
@@ -233,7 +251,7 @@ def get_set_elasticsearch_version():
     """
     Set Elasticsearch version.
     """
-    application_version_set(kv.get('es_version'))
+    application_version_set(es_version())
     set_flag('elasticsearch.version.set')
     set_flag('elasticsearch.init.complete')
 
@@ -242,7 +260,7 @@ def get_set_elasticsearch_version():
 @when_not('pip.elasticsearch.installed')
 def install_elasticsearch_pip_dep():
     status_set('maintenance', "Installing Elasticsearch python client.")
-    sp.call([PIP, 'install', 'elasticsearch>={}'.format(kv.get('es_version'))])
+    sp.call([PIP, 'install', 'elasticsearch>={}'.format(es_version())])
     status_set('active', "Elasticsearch python client installed.")
     set_flag('pip.elasticsearch.installed')
 
@@ -386,10 +404,10 @@ def provide_client_relation_data():
 @when('endpoint.require-master.available')
 def get_all_master_nodes():
     master_nodes = []
+    endpoint = endpoint_from_flag('endpoint.require-master.available')
 
-    for es in endpoint_from_flag(
-        'endpoint.require-master.available').list_unit_data():
-            master_nodes.append("{}:{}".format(es['host'], es['port']))
+    for es in endpoint.list_unit_data():
+        master_nodes.append("{}:{}".format(es['host'], es['port']))
 
     kv.set('master-nodes', master_nodes)
 
@@ -417,3 +435,19 @@ def set_datadog_integration_relation_info():
     endpoint = endpoint_from_flag('endpoint.datadog-integration.available')
     endpoint.configure(integration_name='elastic')
     set_flag('datadog.integration.relation.info.set')
+
+
+@when('config.changed.custom-config',
+      'elastic.base.available')
+def render_custom_config():
+    render_elasticsearch_yml()
+    if not service_running('elasticsearch'):
+        service_start('elasticsearch')
+    # If elasticsearch is running restart it
+    else:
+        service_restart('elasticsearch')
+
+
+@hook('upgrade-charm')
+def upgrade_charm_ops():
+    application_version_set(es_version())
