@@ -2,8 +2,7 @@ includes:
   - 'layer:basic'
   - 'layer:elastic-base'
   - 'layer:leadership'
-#  - 'interface:elasticsearch'
-#  - 'interface:datadog-integration'
+  - 'interface:elasticsearch'
 options:
   elastic-base:
     elastic-pkg: "elasticsearch"

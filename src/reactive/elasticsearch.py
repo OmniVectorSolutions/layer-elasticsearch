@@ -429,14 +429,6 @@ def provide_master_node_type_relation_data():
             ES_CLUSTER_INGRESS_ADDRESS, ES_TRANSPORT_PORT, ES_CLUSTER_NAME)
 
 
-@when('endpoint.datadog-integration.available')
-@when_not('datadog.integration.relation.info.set')
-def set_datadog_integration_relation_info():
-    endpoint = endpoint_from_flag('endpoint.datadog-integration.available')
-    endpoint.configure(integration_name='elastic')
-    set_flag('datadog.integration.relation.info.set')
-
-
 @when('config.changed.custom-config',
       'elastic.base.available')
 def render_custom_config():

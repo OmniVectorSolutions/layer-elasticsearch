@@ -1,3 +1,7 @@
 bdist
 .*.swp
 .tox/
+build/
+interfaces/
+layers/
+

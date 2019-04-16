@@ -13,6 +13,7 @@ tags:
   - data-processing
   - database
   - elastic
+  - omnivector
 series:
 - xenial
 - bionic
@@ -25,8 +26,6 @@ provides:
     interface: "elasticsearch"
   provide-master:
     interface: "elasticsearch"
-  datadog-integration:
-    interface: "datadog-integration"
 peers:
   member:
     interface: "elasticsearch"
