@@ -60,6 +60,7 @@ ES_TRANSPORT_PORT = 9300
 ES_PLUGIN = os.path.join(
     '/', 'usr', 'share', 'elasticsearch', 'bin', 'elasticsearch-plugin')
 
+JAVA_HOME = Path('/usr/lib/jvm/java-8-openjdk-amd64/jre')
 
 MASTER_NODE_CONFIG = """
 node.master: true

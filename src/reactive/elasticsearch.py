@@ -47,6 +47,7 @@ from charms.layer.elasticsearch import (
     ES_HTTP_PORT,
     ES_TRANSPORT_PORT,
     ES_PLUGIN,
+    JAVA_HOME,
     NODE_TYPE_MAP,
     PIP,
 )
@@ -169,7 +170,8 @@ def install_repository_s3_plugin():
 
     if os.path.exists(ES_PLUGIN):
         os.environ['ES_PATH_CONF'] = ES_PATH_CONF
-        sp.call("{} install repository-s3".format(ES_PLUGIN).split())
+        os.environ['JAVA_HOME'] = str(JAVA_HOME)
+        sp.call("{} install repository-s3 -b -s".format(ES_PLUGIN).split())
         set_flag('elasticsearch.repository-s3.plugin.available')
     else:
         log("BAD THINGS - elasticsearch-plugin not available")
@@ -187,6 +189,7 @@ def install_file_based_discovery_plugin():
 
     if os.path.exists(ES_PLUGIN):
         os.environ['ES_PATH_CONF'] = ES_PATH_CONF
+        os.environ['JAVA_HOME'] = str(JAVA_HOME)
         sp.call("{} install discovery-file".format(ES_PLUGIN).split())
         set_flag('elasticsearch.discovery.plugin.available')
     else:
