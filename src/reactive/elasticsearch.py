@@ -2,8 +2,13 @@
 # pylint: disable=c0111,c0103,c0301
 import json
 import os
+import requests
+
 import subprocess as sp
+
 from time import sleep
+
+from requests.auth import HTTPBasicAuth
 
 from charms.reactive import (
     clear_flag,
@@ -37,13 +42,13 @@ from charms.layer.elasticsearch import (
     # pylint: disable=E0611,E0401,C0412
     elasticsearch_plugin_available,
     elasticsearch_version,
-    render_elasticsearch_yaml,
+    render_elasticsearch_file,
     restart_elasticsearch,
     DISCOVERY_FILE_PATH,
     ES_DATA_DIR,
     ES_DEFAULT_FILE_PATH,
     ES_PATH_CONF,
-    ELASTICSEARCH_YML_PATH,
+    ES_YML_PATH,
     ES_PUBLIC_INGRESS_ADDRESS,
     ES_CLUSTER_INGRESS_ADDRESS,
     ES_CLUSTER_NAME,
@@ -57,6 +62,8 @@ from charms.layer.elasticsearch import (
     NODE_TYPE_MAP,
     PIP,
 )
+
+import charms.leadership
 
 
 kv = unitdata.kv()
@@ -74,29 +81,28 @@ def es_active_status():
     )
 
 
-def render_elasticsearch_yml():
+def render_elasticsearch_yml(xpack_security_enabled=True):
     '''
     Render /etc/elasticsearch/elasticsearch.yml
     '''
 
     status_set('maintenance', 'Writing /etc/elasticsearch/elasticsearch.yml')
 
+    xpack_security = "true"
+    if not xpack_security_enabled:
+        xpack_security = "false"
+
     ctxt = {
         'cluster_name': config('cluster-name'),
         'cluster_network_ip': ES_CLUSTER_INGRESS_ADDRESS,
         'node_type': NODE_TYPE_MAP[config('node-type')],
-        'custom_config': config('custom-config')
+        'custom_config': config('custom-config'),
+        'xpack_security_config': f'xpack.security.enabled: {xpack_security}',
     }
-
-    if not is_flag_set('elasticsearch.init.config.rendered'):
-        pass
-    else:
-        if config('xpack-security-enabled'):
-            ctxt['xpack_security_config'] = 'xpack.security.enabled: true'
 
     render_elasticsearch_file(
         'elasticsearch.yml.j2',
-        ELASTICSEARCH_YML_PATH,
+        ES_YML_PATH,
         ctxt
     )
 
@@ -186,6 +192,28 @@ def render_elasticsearch_defaults():
 
 
 @when('elastic.base.available')
+@when_not('elasticsearch.discovery.plugin.available')
+def install_file_based_discovery_plugin():
+    """
+    Install the file based discovery plugin.
+    """
+    if int(es_version()[0]) < 7:
+        if os.path.exists(ES_PLUGIN):
+            os.environ['ES_PATH_CONF'] = ES_PATH_CONF
+            os.environ['JAVA_HOME'] = str(JAVA_HOME)
+            sp.call("{} install discovery-file".format(ES_PLUGIN).split())
+            set_flag('elasticsearch.discovery.plugin.available')
+        else:
+            log("BAD THINGS - elasticsearch-plugin not available")
+            status_set(
+                'blocked',
+                "Cannot find elasticsearch plugin manager - "
+                f"please debug {ES_PLUGIN}"
+            )
+    set_flag('elasticsearch.discovery.plugin.available')
+
+
+@when('elastic.base.available')
 @when_not('elasticsearch.repository-s3.plugin.available')
 def install_repository_s3_plugin():
     '''
@@ -204,22 +232,6 @@ def install_repository_s3_plugin():
         set_flag('elasticsearch.repository-s3.plugin.available')
 
 
-@when('elastic.base.available')
-@when_not('elasticsearch.discovery.plugin.available')
-def install_file_based_discovery_plugin():
-    '''
-    Install the file based discovery plugin.
-    '''
-
-    if elasticsearch_plugin_available():
-        # Set environment variables needed to run elasticsearch-plugin cmd
-        os.environ['ES_PATH_CONF'] = str(ES_PATH_CONF)
-        os.environ['JAVA_HOME'] = str(JAVA_HOME)
-        # Call elasticsearch-plugin install
-        sp.call(f'{ES_PLUGIN} install discovery-file'.split())
-        set_flag('elasticsearch.discovery.plugin.available')
-
-
 @when('elasticsearch.repository-s3.plugin.available',
       'elasticsearch.discovery.plugin.available',
       'elasticsearch.defaults.available',
@@ -229,7 +241,7 @@ def install_file_based_discovery_plugin():
       'swap.removed')
 @when_not('elasticsearch.init.config.rendered')
 def render_config_init():
-    render_elasticsearch_yml()
+    render_elasticsearch_yml(xpack_security_enabled=False)
     set_flag('elasticsearch.init.config.rendered')
 
 
@@ -284,7 +296,7 @@ def get_set_elasticsearch_version():
 @when_not('pip.elasticsearch.installed')
 def install_elasticsearch_pip_dep():
     status_set('maintenance', 'Installing Elasticsearch python client.')
-    sp.call([PIP, 'install', f'elasticsearch>={elasticsearch_version()}'])
+    sp.call([PIP, 'install', f'elasticsearch=={elasticsearch_version()[0]}'])
     status_set('active', 'Elasticsearch python client installed.')
     set_flag('pip.elasticsearch.installed')
 
@@ -347,12 +359,22 @@ def set_node_type_available_flag():
 @when(f'elasticsearch.{ES_NODE_TYPE}.available')
 @when_not('xpack.security.check.complete')
 def check_for_and_configure_xpack_security():
-    if is_leader() and config('xpack-security-enabled'):
-        users = {}
-        out = check_output(
-            f'{ES_PLUGIN} auto-b --silent'.split()
-        )
+    master_or_all = \
+        is_flag_set('elasticsearch.master') or is_flag_set('elasticsearch.all')
 
+    if is_leader() and config('xpack-security-enabled') and master_or_all:
+        render_elasticsearch_yml()
+        restart_elasticsearch()
+
+        # Set environment variables needed to run elasticsearch-setup-passwords
+        os.environ['ES_PATH_CONF'] = str(ES_PATH_CONF)
+        os.environ['JAVA_HOME'] = str(JAVA_HOME)
+
+        out = sp.check_output(
+            f'{ES_SETUP_PASSWORDS} auto -b'.split()
+        ).decode().rstrip()
+
+        users = {}
         for line in out.split('\n'):
             if 'PASSWORD' in line:
                 user = line.split()[1]
@@ -360,20 +382,21 @@ def check_for_and_configure_xpack_security():
                 users[user] = password
 
         charms.leadership.leader_set(users=json.dumps(users))
-        render_elasticsearch_yml()
-        restart_elasticsearch()
     set_flag('xpack.security.check.complete')
 
 
 @when('xpack.security.check.complete')
 @when_not('final.sanity.check.complete')
 def final_sanity_check():
-    if config('xpack-security-enabled'):
+    master_or_all = \
+        is_flag_set('elasticsearch.master') or is_flag_set('elasticsearch.all')
+
+    if config('xpack-security-enabled') and master_or_all:
         users = charms.leadership.leader_get('users')
         auth = HTTPBasicAuth('elastic', json.loads(users)['elastic'])
-        resp = requests.get("http://127.0.0.1:9200", auth=auth)
+        resp = requests.get("http://localhost:9200", auth=auth)
     else:
-        resp = requests.get("http://127.0.0.1:9200")
+        resp = requests.get("http://localhost:9200")
 
     if resp.status_code == 200:
         set_flag('final.sanity.check.complete')
@@ -492,14 +515,12 @@ def provide_master_node_type_relation_data():
 
 
 @when('config.changed.custom-config',
-      'elastic.base.available')
-def render_custom_config():
-    render_elasticsearch_yml()
-    if not service_running('elasticsearch'):
-        service_start('elasticsearch')
-    # If elasticsearch is running restart it
-    else:
-        service_restart('elasticsearch')
+      'final.sanity.check.complete')
+def render_custom_config_on_config_changed():
+    render_elasticsearch_yml(
+        xpack_security_enabled=config('xpack-security-enabled')
+    )
+    restart_elasticsearch()
 
 
 @hook('upgrade-charm')

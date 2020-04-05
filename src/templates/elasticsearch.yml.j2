@@ -7,26 +7,20 @@ http.port: 9200
 network.host: ["0.0.0.0"]
 network.publish_host: ["{{ cluster_network_ip }}"]
 
-discovery.zen.hosts_provider: file
 
 path.logs: /var/log/elasticsearch
 path.data: /srv/elasticsearch-data
 
 discovery.type: single-node
+discovery.seed_providers: file
 
 bootstrap.memory_lock: true
 
-{% if node_type %}
+
 {{ node_type }}
-{% endif %}
-
-{% if xpack_security_config %}
-{{ xpack_securtiy_config }}
-{% endif %}
 
 
+{{ xpack_security_config }}
 
 
-{% if custom_config %}
 {{ custom_config }}
-{% endif %}

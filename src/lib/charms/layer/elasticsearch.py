@@ -97,7 +97,7 @@ search.remote.connect: false
 """
 
 NODE_TYPE_MAP = {
-    'all': None,
+    'all': "",
     'master': MASTER_NODE_CONFIG,
     'data': DATA_NODE_CONFIG,
     'ingest': INGEST_NODE_CONFIG,
@@ -179,7 +179,7 @@ def render_elasticsearch_file(
     ).render(ctxt)
 
     target.write_text(rendered_template)
-    shutil.chown(str(target_file), user, group)
+    shutil.chown(str(target), user, group)
 
 
 def elasticsearch_setup_passwords_available():
@@ -234,7 +234,7 @@ def restart_elasticsearch():
         cnt += 1
 
     if service_running('elasticsearch'):
-        status_set('active', 'Elasticsearch init running')
+        status_set('active', 'Elasticsearch running')
     else:
         # If elasticsearch wont start, set blocked
         status_set(
@@ -242,4 +242,5 @@ def restart_elasticsearch():
             'There are problems with elasticsearch, please debug'
         )
         return False
+
     return True
