@@ -20,6 +20,13 @@ bootstrap.memory_lock: true
 {{ node_type }}
 {% endif %}
 
+{% if xpack_security_config %}
+{{ xpack_securtiy_config }}
+{% endif %}
+
+
+
+
 {% if custom_config %}
 {{ custom_config }}
 {% endif %}

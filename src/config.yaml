@@ -1,9 +1,4 @@
 options:
-  use-xpack:
-    description: |
-      Install XPack on elasticsearch
-    default: true
-    type: boolean
   java-opts:
     description: Java Opts
     default: ""
@@ -23,17 +18,11 @@ options:
       Type of elasticsearch node. Choices are 'data', 'master', 'ingest', 'coordinating', 'all'.
     type: string
     default: 'all'
-  firewall_enabled:
+  xpack-security-enabled:
     description: |
-      this option will enable or disable the ufw. By default this is set to
-      'false' since the firewall is never enabled when a machine or container
-      is created with juju. Set to 'true' to enable firewall. Once enabled
-      rules will be added when another charm has a relation with elasticsearch.
-      This charm will be able to access elasticsearch on port 9200, while
-      all the other traffice to that port will be blocked. Enabling the firewall
-      will also allow port 22 from anywhere.
+      Enable xpack security.
+    default: true
     type: boolean
-    default: false
   cluster-name:
     description: |
       This sets the elasticsearch cluster name. This name is then added to the

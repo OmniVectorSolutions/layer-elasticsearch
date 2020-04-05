@@ -34,20 +34,29 @@ if options.get('basic', 'use_venv'):
 else:
     PIP = 'pip3'
 
+ES_HOME_DIR = Path('/usr/share/elasticsearch')
+
 ES_DATA_DIR = Path('/srv/elasticsearch-data')
 
-ES_PATH_CONF = os.path.join('/', 'etc', 'elasticsearch')
+ES_DEFAULT_FILE_PATH = Path('/etc/default/elasticsearch')
 
-ES_YML_PATH = os.path.join(ES_PATH_CONF, 'elasticsearch.yml')
+ES_PATH_CONF = Path('/etc/elasticsearch')
+
+ES_YML_PATH = ES_PATH_CONF / 'elasticsearch.yml'
+
+DISCOVERY_FILE_PATH = ES_PATH_CONF / 'discovery-file' / 'unicast_hosts.txt'
+
+ES_PLUGIN = ES_HOME_DIR / 'bin' / 'elasticsearch-plugin'
+
+ES_SETUP_PASSWORDS = ES_HOME_DIR / 'bin' / 'elasticsearch-setup-passwords'
+
+JVM_OPTIONS = ES_PATH_CONF / 'jvm.options'
+
+JAVA_HOME = Path('/usr/lib/jvm/java-8-openjdk-amd64/jre')
 
 ES_PUBLIC_INGRESS_ADDRESS = network_get('public')['ingress-addresses'][0]
 
 ES_CLUSTER_INGRESS_ADDRESS = network_get('cluster')['ingress-addresses'][0]
-
-DISCOVERY_FILE_PATH = os.path.join(
-    ES_PATH_CONF, 'discovery-file', 'unicast_hosts.txt')
-
-ES_DEFAULT_FILE_PATH = os.path.join('/', 'etc', 'default', 'elasticsearch')
 
 ES_NODE_TYPE = config('node-type')
 
@@ -57,10 +66,7 @@ ES_HTTP_PORT = 9200
 
 ES_TRANSPORT_PORT = 9300
 
-ES_PLUGIN = os.path.join(
-    '/', 'usr', 'share', 'elasticsearch', 'bin', 'elasticsearch-plugin')
-
-JAVA_HOME = Path('/usr/lib/jvm/java-8-openjdk-amd64/jre')
+CHARM_TEMPLATES = Path(f"{charm_dir()}/templates")
 
 MASTER_NODE_CONFIG = """
 node.master: true
@@ -90,11 +96,13 @@ node.ingest: false
 search.remote.connect: false
 """
 
-NODE_TYPE_MAP = {'all': None,
-                 'master': MASTER_NODE_CONFIG,
-                 'data': DATA_NODE_CONFIG,
-                 'ingest': INGEST_NODE_CONFIG,
-                 'coordinating': COORDINATING_NODE_CONFIG}
+NODE_TYPE_MAP = {
+    'all': None,
+    'master': MASTER_NODE_CONFIG,
+    'data': DATA_NODE_CONFIG,
+    'ingest': INGEST_NODE_CONFIG,
+    'coordinating': COORDINATING_NODE_CONFIG,
+}
 
 
 kv = unitdata.kv()
@@ -117,7 +125,7 @@ def start_restart(service):
         service_start(service)
 
 
-def es_version():
+def elasticsearch_version():
     """Return elasticsearch version
     """
 
@@ -146,8 +154,13 @@ def es_version():
         log(e.message)
 
 
-def render_elasticsearch_file(template, file_path, ctxt,
-                              user=None, group=None):
+def render_elasticsearch_file(
+    template,
+    target,
+    ctxt,
+    user=None,
+    group=None
+) -> None:
     if not user and not group:
         user = 'elasticsearch'
         group = 'elasticsearch'
@@ -158,55 +171,75 @@ def render_elasticsearch_file(template, file_path, ctxt,
         user = user
         group = group
 
-    # Remove file if exists
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    # Render template to file
+    rendered_template = Environment(
+        loader=FileSystemLoader(str(CHARM_TEMPLATES))
+    ).get_template(
+        str(template)
+    ).render(ctxt)
 
-    # Spew rendered template into file
-    spew(file_path, load_template(template).render(ctxt))
-
-    # Set perms
-    chown(os.path.dirname(file_path), user=user, group=group, recursive=True)
+    target.write_text(rendered_template)
+    shutil.chown(str(target_file), user, group)
 
 
-def load_template(name, path=None):
-    """ load template file
-    :param str name: name of template file
-    :param str path: alternate location of template location
+def elasticsearch_setup_passwords_available():
+    """Check elasticsearch-setup-passwords exe is available.
     """
-    if path is None:
-        path = os.path.join(charm_dir(), 'templates')
-    env = Environment(
-        loader=FileSystemLoader(path))
-    return env.get_template(name)
+
+    if os.path.exists(ES_SETUP_PASSWORDS):
+        return True
+    else:
+        # If the the elasticsearch-plugin exe doesn't exist we are in trouble,
+        # set workload status to 'blocked' and log.
+        status_set(
+            'blocked',
+            "Cannot find elasticsearch-setup-passwords exe - "
+            f"please debug {ES_SETUP_PASSWORDS}"
+        )
+        log("BAD THINGS - elasticsearch-setup-passwords not available")
+        return False
 
 
-def spew(path, data):
-    """ Writes data to path
-    :param str path: path of file to write to
-    :param str data: contents to write
+def elasticsearch_plugin_available():
+    """Check elasticsearch-plugin exe is available.
     """
-    with open(path, 'w') as f:
-        f.write(data)
+
+    if os.path.exists(ES_PLUGIN):
+        return True
+    else:
+        # If the the elasticsearch-plugin exe doesn't exist we are in trouble,
+        # set workload status to 'blocked' and log.
+        status_set(
+            'blocked',
+            "Cannot find elasticsearch plugin manager - "
+            f"please debug {ES_PLUGIN}"
+        )
+        log("BAD THINGS - elasticsearch-plugin not available")
+        return False
 
 
-def chown(path, user, group=None, recursive=False):
-    """
-    Change user/group ownership of file
-    :param path: path of file or directory
-    :param str user: new owner username
-    :param str group: new owner group name
-    :param bool recursive: set files/dirs recursively
-    """
-    try:
-        if not recursive or os.path.isfile(path):
-            shutil.chown(path, user, group)
-        else:
-            for root, dirs, files in os.walk(path):
-                shutil.chown(root, user, group)
-                for item in dirs:
-                    shutil.chown(os.path.join(root, item), user, group)
-                for item in files:
-                    shutil.chown(os.path.join(root, item), user, group)
-    except OSError as e:
-        print(e)
+def restart_elasticsearch():
+    # If elasticsearch isn't running start it
+    if not service_running('elasticsearch'):
+        service_start('elasticsearch')
+    # If elasticsearch is running restart it
+    else:
+        service_restart('elasticsearch')
+    # Wait 100 seconds for elasticsearch to restart, then break out of the loop
+    # and blocked wil be set below
+    cnt = 0
+    while not service_running('elasticsearch') and cnt < 100:
+        status_set('waiting', 'Waiting for Elasticsearch to start')
+        sleep(1)
+        cnt += 1
+
+    if service_running('elasticsearch'):
+        status_set('active', 'Elasticsearch init running')
+    else:
+        # If elasticsearch wont start, set blocked
+        status_set(
+            'blocked',
+            'There are problems with elasticsearch, please debug'
+        )
+        return False
+    return True
