@@ -12,6 +12,10 @@ discovery.zen.hosts_provider: file
 path.logs: /var/log/elasticsearch
 path.data: /srv/elasticsearch-data
 
+discovery.type: single-node
+
+bootstrap.memory_lock: true
+
 {% if node_type %}
 {{ node_type }}
 {% endif %}
