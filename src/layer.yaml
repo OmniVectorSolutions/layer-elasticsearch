@@ -3,6 +3,7 @@ includes:
   - 'layer:elastic-base'
   - 'layer:leadership'
   - 'interface:elasticsearch'
+  - 'interface:kibana'
 options:
   elastic-base:
     elastic-pkg: "elasticsearch"

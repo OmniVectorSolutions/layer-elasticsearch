@@ -22,6 +22,8 @@ requires:
   require-master:
     interface: "elasticsearch"
 provides:
+  kibana:
+    interface: "kibana"
   client:
     interface: "elasticsearch"
   provide-master:

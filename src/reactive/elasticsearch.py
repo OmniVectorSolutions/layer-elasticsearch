@@ -422,7 +422,7 @@ def install_repository_s3_plugin():
 
     if elasticsearch_plugin_available():
         # Fix /etc/elasticsearch/jvm.options
-        #with open(str(JVM_OPTIONS), 'a') as jvm_options:
+        # with open(str(JVM_OPTIONS), 'a') as jvm_options:
         #    jvm_options.write('-Des.allow_insecure_settings=true')
         # Set environment variables needed to run elasticsearch-plugin cmd
         os.environ['ES_PATH_CONF'] = str(ES_PATH_CONF)
@@ -438,34 +438,32 @@ def install_file_based_discovery_plugin():
     """
     Install the file based discovery plugin.
     """
-    elasticsearch_vers = kv.get('elasticsearch_version')
-    if int(elasticsearch_vers[0]) < 7:
+    # Initial check to make sure elasticsearch-plugin is available
+    if not elasticsearch_plugin_available():
+        log("BAD THINGS - elasticsearch-plugin not available")
+        status_set(
+            'blocked',
+            (
+                "Cannot find elasticsearch plugin manager - "
+                f"please debug {str(ES_PLUGIN)}"
+            )
+        )
+        return
+
+    if int(kv.get('elasticsearch_version')[0]) < 7:
         if elasticsearch_plugin_available():
             os.environ['ES_PATH_CONF'] = str(ES_PATH_CONF)
             os.environ['JAVA_HOME'] = str(JAVA_HOME)
             sp.call("{} install discovery-file".format(str(ES_PLUGIN)).split())
-            set_flag('elasticsearch.discovery.plugin.available')
             discovery_file_location = Path(
                 f"{str(ES_PATH_CONF)}/discovery-file/unicast_hosts.txt"
-            )
-        else:
-            log("BAD THINGS - elasticsearch-plugin not available")
-            status_set(
-                'blocked',
-                (
-                    "Cannot find elasticsearch plugin manager - "
-                    f"please debug {str(ES_PLUGIN)}"
-                )
             )
     else:
         discovery_file_location = Path(
             f"{str(ES_PATH_CONF)}/unicast_hosts.txt"
         )
-    if is_leader():
-        charms.leadership.leader_set(
-           discovery_file_location=str(discovery_file_location)
-        )
     discovery_file_location.touch()
+    kv.set('discovery_file_location', str(discovery_file_location))
     set_flag('elasticsearch.discovery.plugin.available')
 
 
@@ -506,75 +504,6 @@ def render_config_post_bootstrap_init():
     if restart_elasticsearch():
         sleep(10)
         set_flag('elasticsearch.bootstrapped')
-
-
-#@when('elasticsearch.init.config.rendered')
-#@when_not('elasticsearch.init.running')
-#def ensure_elasticsearch_init_started():
-#    '''
-#    Ensure elasticsearch is started.
-#    (this should only run once)
-#    '''
-
-#    sp.call(['systemctl', 'daemon-reload'])
-#    sp.call(['systemctl', 'enable', 'elasticsearch.service'])
-
-#    if restart_elasticsearch():
-#        set_flag('elasticsearch.init.running')
-
-
-#@when('leadership.is_leader',
-#      'elasticsearch.init.config.and.restart.complete')
-#@when_not('leadership.set.cluster_bootstrapped')
-#def bootstrap_using_leader():
-
-
-
-@when('endpoint.member.joined')
-def update_unitdata_kv():
-    """
-    This handler is ran whenever a peer is joined.
-    (all node types use this handler to coordinate peers)
-    """
-
-    peers = endpoint_from_flag('endpoint.member.joined').all_units
-    if len(peers) > 0 and \
-       len([peer._data['private-address']
-            for peer in peers if peer._data is not None]) > 0:
-        kv.set('peer-nodes',
-               [peer._data['private-address']
-                for peer in peers if peer._data is not None])
-        set_flag('render.elasticsearch.unicast-hosts')
-
-
-@when('render.elasticsearch.unicast-hosts',
-      'elasticsearch.discovery.plugin.available')
-def update_discovery_file():
-    '''
-    Update discovery-file
-    '''
-
-    nodes = []
-
-    if is_flag_set('elasticsearch.all') or is_flag_set('elasticsearch.master'):
-        nodes = kv.get('peer-nodes', [])
-    else:
-        nodes = kv.get('master-nodes', []) + kv.get('peer-nodes', [])
-    
-    render_elasticsearch_file(
-        'unicast_hosts.txt.j2',
-        Path(charms.leadership.leader_get('discovery_file_location')),
-        {'nodes': nodes}
-    )
-
-    clear_flag('render.elasticsearch.unicast-hosts')
-
-
-#@when('elasticsearch.init.complete')
-#@when_not('elasticsearch.final.restart.complete')
-#def node_type_all_final_restart_complete():
-#    restart_elasticsearch()
-#    set_flag('elasticsearch.final.restart.complete')
 
 
 @when('elasticsearch.bootstrapped')
@@ -642,89 +571,115 @@ def set_active_status():
     es_active_status()
 
 
-## Node-Type Tribe/Ingest/Data Handlers
-#@when_any('elasticsearch.coordinating',
-#          'elasticsearch.ingest',
-#          'elasticsearch.data')
-#@when('elasticsearch.final.restart.complete')
-#@when_not('elasticsearch.master.acquired')
-#def block_until_master_relation():
-#    '''
-#    Block non-master node types until we have a master relation.
-#
-#    (coordinating, ingest, data)
-#    '''
-#    status_set(
-#        'blocked',
-#        'Need relation to Elasticsearch master to continue'
-#    )
-#    return
-#
-#
-#@when('elasticsearch.final.restart.complete',
-#      'elasticsearch.master')
-#@when_not('elasticsearch.min.masters.available')
-#def block_until_min_masters():
-#    '''
-#    Block master node types from making further progress
-#    until we have >= config('min-master-count').
-#    '''
-#
-#    if not (len(kv.get('peer-nodes', [])) >= (config('min-master-count') - 1)):
-#        status_set(
-#            'blocked',
-#            f'Need >= {config("min-master-count")} masters to continue'
-#        )
-#        return
-#    else:
-#        set_flag('elasticsearch.min.masters.available')
-#
-#
-## Client Relation
-#@when('endpoint.client.joined',
-#      f'elasticsearch.{ES_NODE_TYPE}.available')
-#def provide_client_relation_data():
-#    '''
-#    Set client relation data.
-#
-#    (only 'master' or 'all' type nodes should run this code)
-#    '''
-#
-#    if ES_NODE_TYPE not in ['master', 'all']:
-#        log('SOMETHING BAD IS HAPPENING - wronge nodetype for client relation')
-#        status_set(
-#            'blocked',
-#            'Cannot make relation to master - '
-#            'wrong node-typeforclient relation, please remove relation'
-#        )
-#        return
-#    else:
-#        endpoint_from_flag('endpoint.client.joined').configure(
-#            ES_PUBLIC_INGRESS_ADDRESS,
-#            ES_HTTP_PORT,
-#            ES_CLUSTER_NAME
-#        )
-#        es_active_status()
-#
-#
-## Non-Master Node Relation
-#@when('endpoint.require-master.available')
-#def get_all_master_nodes():
-#    master_nodes = []
-#    endpoint = endpoint_from_flag('endpoint.require-master.available')
-#
-#    for es in endpoint.list_unit_data():
-#        master_nodes.append('{}:{}'.format(es['host'], es['port']))
-#
-#    kv.set('master-nodes', master_nodes)
-#
-#    set_flag('render.elasticsearch.unicast-hosts')
-#    set_flag('elasticsearch.master.acquired')
-#
-#
-## Master Node Relation
-#@when('endpoint.provide-master.joined')
-#def provide_master_node_type_relation_data():
+@when('endpoint.member.joined')
+def update_unitdata_kv():
+    """
+    This handler is ran whenever a peer is joined.
+    (all node types use this handler to coordinate peers)
+    """
+
+    peers = endpoint_from_flag('endpoint.member.joined').all_units
+    if len(peers) > 0 and \
+       len([peer._data['private-address']
+            for peer in peers if peer._data is not None]) > 0:
+        kv.set('peer-nodes',
+               [peer._data['private-address']
+                for peer in peers if peer._data is not None])
+        set_flag('render.elasticsearch.unicast-hosts')
+
+
+@when('render.elasticsearch.unicast-hosts',
+      'elasticsearch.discovery.plugin.available')
+def update_discovery_file():
+    '''
+    Update discovery-file
+    '''
+
+    nodes = []
+
+    if is_flag_set('elasticsearch.all') or is_flag_set('elasticsearch.master'):
+        nodes = kv.get('peer-nodes', [])
+    else:
+        nodes = kv.get('master-nodes', []) + kv.get('peer-nodes', [])
+
+    render_elasticsearch_file(
+        'unicast_hosts.txt.j2',
+        Path(kv.get('discovery_file_location')),
+        {'nodes': nodes}
+    )
+
+    clear_flag('render.elasticsearch.unicast-hosts')
+
+
+# Node-Type Tribe/Ingest/Data Handlers
+@when_any('elasticsearch.coordinating',
+          'elasticsearch.ingest',
+          'elasticsearch.data')
+@when_not('elasticsearch.master.acquired')
+def block_until_master_relation():
+    '''
+    Block non-master node types until we have a master relation.
+
+    (coordinating, ingest, data)
+    '''
+    status_set(
+        'blocked',
+        'Need relation to Elasticsearch master to continue'
+    )
+    return
+
+
+# Kibana Relation
+@when('endpoint.kibana.joined',
+      'leadership.set.users',
+      f'elasticsearch.{ES_NODE_TYPE}.available')
+def provide_client_relation_data():
+    '''
+    Set client relation data.
+
+    (only 'master' or 'all' type nodes should run this code)
+    '''
+
+    if ES_NODE_TYPE not in ['master', 'all']:
+        log('SOMETHING BAD IS HAPPENING - wronge nodetype for client relation')
+        status_set(
+            'blocked',
+            'Cannot make relation to master - '
+            'wrong node-typeforclient relation, please remove relation'
+        )
+        return
+    else:
+        if config('xpack-security-enabled'):
+            ctxt = {}
+            users = charms.leadership.leader_get('users')
+            ctxt = {
+                'elasticsearch_creds': {
+                    'username': 'kibana',
+                    'password': json.loads(users)['kibana']
+                }
+            }
+            endpoint_from_flag('endpoint.kibana.joined').configure(**ctxt)
+            es_active_status()
+
+
+# Non-Master Node Relation
+@when('endpoint.require-master.available')
+def get_all_master_nodes():
+    master_nodes = []
+    endpoint = endpoint_from_flag('endpoint.require-master.available')
+
+    for es in endpoint.list_unit_data():
+        master_nodes.append('{}:{}'.format(es['host'], es['port']))
+
+    kv.set('master-nodes', master_nodes)
+
+    set_flag('render.elasticsearch.unicast-hosts')
+    set_flag('elasticsearch.master.acquired')
+
+
+# Master Node Relation
+# @when('endpoint.provide-master.joined')
+# def provide_master_node_type_relation_data():
 #    if not ES_NODE_TYPE == 'master':
 #        log('SOMETHING BAD IS HAPPENING - wronge node type for relation')
 #        status_set(
@@ -740,15 +695,43 @@ def set_active_status():
 #        )
 #
 #
-#@when('config.changed.custom-config',
-#      'final.sanity.check.complete')
-#def render_custom_config_on_config_changed():
-#    render_elasticsearch_yml(
-#        xpack_security_enabled=config('xpack-security-enabled')
-#    )
-#    restart_elasticsearch()
-#
-#
-#@hook('upgrade-charm')
-#def upgrade_charm_ops():
-#    application_version_set(elasticsearch_version())
+
+
+# Client Relation
+@when('endpoint.client.joined',
+      f'elasticsearch.{ES_NODE_TYPE}.available')
+def provide_client_relation_data():
+    '''
+    Set client relation data.
+
+    (only 'master' or 'all' type nodes should run this code)
+    '''
+
+    if ES_NODE_TYPE not in ['master', 'all']:
+        log('SOMETHING BAD IS HAPPENING - wronge nodetype for client relation')
+        status_set(
+            'blocked',
+            'Cannot make relation to master - '
+            'wrong node-typeforclient relation, please remove relation'
+        )
+        return
+    else:
+        endpoint_from_flag('endpoint.client.joined').configure(
+            ES_PUBLIC_INGRESS_ADDRESS,
+            ES_HTTP_PORT,
+            ES_CLUSTER_NAME
+        )
+        es_active_status()
+
+
+@when('config.changed.custom-config',
+      'final.sanity.check.complete')
+def render_custom_config_on_config_changed():
+    render_elasticsearch_yml()
+    if restart_elasticsearch():
+        status_set('active', "Success changing config")
+
+
+@hook('upgrade-charm')
+def upgrade_charm_ops():
+    application_version_set(elasticsearch_version())
