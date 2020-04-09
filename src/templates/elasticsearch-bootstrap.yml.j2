@@ -11,23 +11,22 @@ network.publish_host: ["{{ cluster_network_ip }}"]
 path.logs: /var/log/elasticsearch
 path.data: /srv/elasticsearch-data
 
-{{ node_type }}
-
-
-
 discovery.seed_providers: file
+
 {% if discovery_type %}
 {{discovery_type}}
 {% endif %}
 
 {{bootstrap_memory_lock}}
 
-{{ custom_config }}
+{{xpack_security_enabled}}
 
-{{ xpack_security_enabled }}
-{% if xpack_security_enabled == "xpack.security.enabled: true" %}
-{{xpack_security_transport_ssl_enabled}}
-{{xpack_security_transport_ssl_verification_mode}}
-{{xpack_security_transport_ssl_keystore_path}}
-{{xpack_security_transport_ssl_truststore_path}}
+{% if cluster_initial_master_nodes %}
+cluster.initial_master_nodes:
+{%- for node in cluster_initial_master_nodes %}
+- {{node}}
+{% endfor %}
 {% endif %}
+
+
+{{ node_type }}
