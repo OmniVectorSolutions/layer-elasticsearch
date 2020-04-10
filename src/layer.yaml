@@ -6,5 +6,7 @@ includes:
   - 'interface:kibana'
 options:
   elastic-base:
-    elastic-pkg: "elasticsearch"
+    elastic-pkgs:
+      - "elasticsearch"
+      - "metricbeat"
 repo: "https://github.com/omnivector-solutions/layer-elasticsearch"

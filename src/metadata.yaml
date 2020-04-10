@@ -1,7 +1,7 @@
 name: elasticsearch
 display-name: Elasticsearch
 summary: Open Source, Distributed, RESTful Search Engine
-maintainer: James Beedy <jamesbeedy@gmail.com>
+maintainer: Omnivector Solutions <admin@omnivector.solutions>
 description: |
   Elasticsearch is a search server based on Lucene. It provides a
   distributed, multitenant-capable full-text search engine with a
@@ -15,7 +15,6 @@ tags:
   - elastic
   - omnivector
 series:
-- xenial
 - bionic
 subordinate: false
 requires:
@@ -34,7 +33,7 @@ peers:
 extra-bindings:
   public:
   cluster:
-storage:
-  data:
-    type: filesystem
-    location: /srv/elasticsearch-data
+#storage:
+#  data:
+#    type: filesystem
+#    location: /srv/elasticsearch-data
