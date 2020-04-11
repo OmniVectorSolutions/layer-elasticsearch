@@ -794,7 +794,8 @@ def get_set_monitoring_hosts():
 
 @when('leadership.set.monitoring_kibana_host_port',
       'leadership.set.monitoring_elastic_user_password',
-      'leadership.set.monitoring_es_servers')
+      'leadership.set.monitoring_es_servers',
+      'final.sanity.check.complete')
 @when_not('elasticsearch.external.monitoring.cluster.configured')
 def hookup_the_beats():
     """Configure and enable the monitoring
