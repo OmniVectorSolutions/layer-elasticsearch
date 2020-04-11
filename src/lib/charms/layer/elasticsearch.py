@@ -229,25 +229,24 @@ def elasticsearch_plugin_available():
         return False
 
 
-def restart_elasticsearch():
-    # If elasticsearch isn't running start it
-    start_restart('elasticsearch')
+def start_restart_systemd_service(systemd_service):
+    start_restart(systemd_service)
 
-    # Wait 100 seconds for elasticsearch to restart, then break out of the loop
+    # Wait 100 seconds for service to start, then break out of the loop
     # and set blocked status.
     cnt = 0
-    while not service_running('elasticsearch') and cnt < 100:
-        status_set('waiting', 'Waiting for Elasticsearch to start')
+    while not service_running(systemd_service) and cnt < 100:
+        status_set('waiting', f'Waiting for {systemd_service} to start')
         sleep(1)
         cnt += 1
 
-    if service_running('elasticsearch'):
-        status_set('active', 'Elasticsearch running')
+    if service_running(systemd_service):
+        status_set('active', f'{systemd_service} running')
     else:
         # If elasticsearch wont start, set blocked
         status_set(
             'blocked',
-            'There are problems with elasticsearch, please debug'
+            f'There are problems with {systemd_service}, please debug'
         )
         return False
 

@@ -3,10 +3,12 @@ includes:
   - 'layer:elastic-base'
   - 'layer:leadership'
   - 'interface:elasticsearch'
-  - 'interface:kibana'
+  - 'interface:elasticsearch-user-credentials'
+  - 'interface:host-port'
 options:
   elastic-base:
     elastic-pkgs:
       - "elasticsearch"
       - "metricbeat"
+      - "filebeat"
 repo: "https://github.com/omnivector-solutions/layer-elasticsearch"

@@ -24,6 +24,7 @@ discovery.seed_providers: file
 
 {{ custom_config }}
 
+xpack.monitoring.enabled: true
 {{ xpack_security_enabled }}
 {% if xpack_security_enabled == "xpack.security.enabled: true" %}
 {{xpack_security_transport_ssl_enabled}}

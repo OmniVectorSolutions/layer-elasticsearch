@@ -7,6 +7,15 @@ export CHARM_DEPS_DIR := ./build/deps
 export CHARM_PUSH_RESULT := charm-store-push-result.txt
 
 # TARGETS
+init: ## Init layers and interfaces
+	rm -rf layers
+	rm -rf interfaces
+	mkdir layers interfaces
+	ssh-agent bash -c 'ssh-add  ~/.ssh/id_rsa; git clone git@github.com:omnivector-solutions/layer-elastic-base layers/elastic-base'
+	ssh-agent bash -c 'ssh-add  ~/.ssh/id_rsa; git clone git@github.com:omnivector-solutions/interface-elasticsearch-user-credentials interfaces/elasticsearch-user-credentials'
+	ssh-agent bash -c 'ssh-add  ~/.ssh/id_rsa; git clone git@github.com:omnivector-solutions/interface-host-port interfaces/host-port'
+	ssh-agent bash -c 'ssh-add  ~/.ssh/id_rsa; git clone git@github.com:omnivector-solutions/interface-elasticsearch interfaces/elasticsearch'
+
 lint: ## Run linter
 	tox -e lint
 

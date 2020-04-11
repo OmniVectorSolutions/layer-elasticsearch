@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# pylint: disable=c0111,c0103,c0301
 import json
 import os
 import requests
@@ -24,6 +23,11 @@ from charms.reactive import (
     when_not,
     hook,
 )
+
+from charmhelpers.core.templating import (
+    render,
+)
+
 from charmhelpers.core.hookenv import (
     application_version_set,
     charm_dir,
@@ -50,7 +54,7 @@ from charms.layer.elasticsearch import (
     elasticsearch_plugin_available,
     elasticsearch_version,
     render_elasticsearch_file,
-    restart_elasticsearch,
+    start_restart_systemd_service,
     ES_DATA_DIR,
     ES_DEFAULT_FILE_PATH,
     ES_PATH_CONF,
@@ -204,14 +208,8 @@ def set_elasticsearch_started_flag():
     set_flag('elasticsearch.juju.started')
 
 
-@hook('data-storage-attached')
-def set_storage_available_flag():
-    set_flag('elasticsearch.storage.available')
-
-
-@when('elasticsearch.storage.available',
-      'elastic.base.available')
-@when_not('elasticsearch.storage.prepared')
+@when('elastic.base.available')
+@when_not('elasticsearch.storage.dir.prepared')
 def prepare_es_data_dir():
     '''
     Create (if not exists) and set perms on elasticsearch data dir.
@@ -228,7 +226,40 @@ def prepare_es_data_dir():
         chowntopdir=True
     )
 
-    set_flag('elasticsearch.storage.prepared')
+    set_flag('elasticsearch.storage.dir.prepared')
+
+
+# @hook('data-storage-attached')
+# def set_storage_available_flag():
+#    set_flag('elasticsearch.storage.available')
+
+
+@when('elasticsearch.storage.dir.prepared')
+@when_not('direct.attached.storage.check.complete')
+def check_for_and_mount_direct_attached_storage():
+    direct_attached_device = Path('/dev/nvme0n1')
+    if direct_attached_device.exists():
+        sp.call(
+            [
+                'mkfs.ext4',
+                str(direct_attached_device)
+            ]
+        )
+        sp.call(
+            [
+                'mount',
+                str(direct_attached_device),
+                '/etc/elasticsearch-data'
+            ]
+        )
+        with open('/etc/fstab', 'a') as f:
+            f.write(
+                (
+                    '/dev/nvme0n1 /srv/elasticsearch-data '
+                    'ext4 defaults,nofail 0 2'
+                )
+            )
+    set_flag('direct.attached.storage.check.complete')
 
 
 @when('elastic.base.available')
@@ -260,8 +291,8 @@ def render_elasticsearch_defaults():
         'elasticsearch.default.j2',
         ES_DEFAULT_FILE_PATH,
         ctxt,
+        'elasticsearch',
         'root',
-        'elasticsearch'
     )
     os.chmod(str(ES_DEFAULT_FILE_PATH), 0o660)
 
@@ -272,7 +303,7 @@ def render_elasticsearch_defaults():
 @when('elasticsearch.defaults.available',
       'elasticsearch.ports.available',
       'elasticsearch.juju.started',
-      'elasticsearch.storage.prepared',
+      'direct.attached.storage.check.complete',
       'container.check.complete',
       'leadership.set.master_ip',
       'swap.removed')
@@ -300,8 +331,8 @@ def render_bootstrap_config():
     sp.call(['systemctl', 'daemon-reload'])
     sp.call(['systemctl', 'enable', 'elasticsearch.service'])
 
-    if restart_elasticsearch():
-        sleep(10)
+    if start_restart_systemd_service('elasticsearch'):
+        sleep(1)
         set_flag('elasticsearch.init.running')
 
 
@@ -501,8 +532,8 @@ def render_config_post_bootstrap_init():
 
     render_elasticsearch_yml()
 
-    if restart_elasticsearch():
-        sleep(10)
+    if start_restart_systemd_service('elasticsearch'):
+        sleep(1)
         set_flag('elasticsearch.bootstrapped')
 
 
@@ -578,7 +609,7 @@ def update_unitdata_kv():
     (all node types use this handler to coordinate peers)
     """
 
-    peers = endpoint_from_flag('endpoint.member.joined').all_units
+    peers = endpoint_from_flag('endpoint.member.joined').all_joined_units
     if len(peers) > 0 and \
        len([peer._data['private-address']
             for peer in peers if peer._data is not None]) > 0:
@@ -629,16 +660,22 @@ def block_until_master_relation():
     return
 
 
-# Kibana Relation
-@when('endpoint.kibana.joined',
+# Elastic-Credentials Relation
+@when('endpoint.elastic-credentials.joined',
       'leadership.set.users',
       f'elasticsearch.{ES_NODE_TYPE}.available')
-def provide_client_relation_data():
+@when_not('elastic.credentials.available')
+def provide_elastic_user_credentials():
     '''
-    Set client relation data.
+    Provide elastic user username and password via the
+    elastic-credentials interface.
 
     (only 'master' or 'all' type nodes should run this code)
     '''
+    status_set(
+        'maintenance',
+        'Sending "elastic" user credentials via relation.'
+    )
 
     if ES_NODE_TYPE not in ['master', 'all']:
         log('SOMETHING BAD IS HAPPENING - wronge nodetype for client relation')
@@ -649,52 +686,239 @@ def provide_client_relation_data():
         )
         return
     else:
-        if config('xpack-security-enabled'):
-            ctxt = {}
-            users = charms.leadership.leader_get('users')
-            ctxt = {
-                'elasticsearch_creds': {
-                    'username': 'kibana',
-                    'password': json.loads(users)['kibana']
-                }
-            }
-            endpoint_from_flag('endpoint.kibana.joined').configure(**ctxt)
-            es_active_status()
+        ctxt = {}
+        users = charms.leadership.leader_get('users')
+        ctxt = {
+            'username': 'elastic',
+            'password': json.loads(users)['elastic']
+        }
+    endpoint_from_flag('endpoint.elastic-credentials.joined').configure(**ctxt)
+    set_flag('elastic.credentials.available')
+    es_active_status()
 
 
-# Non-Master Node Relation
-@when('endpoint.require-master.available')
-def get_all_master_nodes():
-    master_nodes = []
-    endpoint = endpoint_from_flag('endpoint.require-master.available')
+# Kibana Relation
+@when('endpoint.kibana-credentials.joined',
+      'leadership.set.users',
+      f'elasticsearch.{ES_NODE_TYPE}.available')
+@when_not('kibana.credentials.available')
+def provide_kibana_user_credentials():
+    '''
+    Provide kibana user credentials via the kibana-credentials
+    interface.
 
-    for es in endpoint.list_unit_data():
-        master_nodes.append('{}:{}'.format(es['host'], es['port']))
+    (only 'master' or 'all' type nodes should run this code)
+    '''
+    status_set(
+        'maintenance',
+        'Sending "kibana" user credentials via relation.'
+    )
 
-    kv.set('master-nodes', master_nodes)
+    if ES_NODE_TYPE not in ['master', 'all']:
+        log('SOMETHING BAD IS HAPPENING - wronge nodetype for client relation')
+        status_set(
+            'blocked',
+            'Cannot make relation to master - '
+            'wrong node-type for kibana-credentials relations, please remove '
+            'relation.'
+        )
+        return
+    else:
+        ctxt = {}
+        users = charms.leadership.leader_get('users')
+        ctxt = {
+            'username': 'kibana',
+            'password': json.loads(users)['kibana']
+        }
 
-    set_flag('render.elasticsearch.unicast-hosts')
-    set_flag('elasticsearch.master.acquired')
+    endpoint_from_flag('endpoint.kibana-credentials.joined').configure(**ctxt)
+    set_flag('kibana.credentials.available')
+    es_active_status()
+
+
+@when('leadership.is_leader',
+      'endpoint.kibana-host-port.available')
+def acquire_kibana_host_port_via_relation():
+    """Get kibana host:port from relation, set to leader.
+    """
+    status_set(
+        'maintenance',
+        'Acquiring kibana host:port ...'
+    )
+    endpoint = endpoint_from_flag('endpoint.kibana-host-port.available')
+
+    kibana_host_port = endpoint.list_unit_data()[0]
+
+    host = kibana_host_port['host']
+    port = kibana_host_port['port']
+
+    charms.leadership.leader_set(
+        monitoring_kibana_host_port=f"{host}:{port}"
+    )
+    es_active_status()
+
+
+@when('leadership.is_leader',
+      'endpoint.monitoring-credentials.available')
+def acquire_monitoring_elasticsearch_user_pass():
+    """Get password from elasticsearch monitoring cluster.
+    """
+    status_set(
+        'maintenance',
+        'Acquiring monitoring credentials ...'
+    )
+    endpoint = endpoint_from_flag('endpoint.monitoring-credentials.available')
+    password = endpoint.list_unit_data()[0]['password']
+    charms.leadership.leader_set(monitoring_elastic_user_password=password)
+    es_active_status()
+
+
+@when('leadership.is_leader',
+      'endpoint.monitoring-hosts.available')
+def get_set_monitoring_hosts():
+    status_set(
+        'maintenance',
+        'Acquiring monitoring servers ...'
+    )
+    endpoint = endpoint_from_flag('endpoint.monitoring-hosts.available')
+    monitoring_es_servers = ",".join([
+        es['host']
+        for es in endpoint.list_unit_data()
+    ])
+
+    charms.leadership.leader_set(
+        monitoring_es_servers=monitoring_es_servers
+    )
+    es_active_status()
+
+
+@when('leadership.set.monitoring_kibana_host_port',
+      'leadership.set.monitoring_elastic_user_password',
+      'leadership.set.monitoring_es_servers')
+@when_not('elasticsearch.external.monitoring.cluster.configured')
+def hookup_the_beats():
+    """Configure and enable the monitoring
+    to export metrics to the monitoring cluster.
+    """
+    status_set(
+        'maintenance',
+        'Configuring monitoring ...'
+    )
+    kibana_host_port = \
+        charms.leadership.leader_get('monitoring_kibana_host_port')
+    elastic_user_password = \
+        charms.leadership.leader_get('monitoring_elastic_user_password')
+    monitoring_es_servers = \
+        charms.leadership.leader_get('monitoring_es_servers').split(",")
+
+    ctr = 0
+    while requests.get(f"http://{kibana_host_port}").status_code != 200 and\
+            ctr <= 100:
+        if ctr == 100:
+            return
+        status_set('waiting', "Waiting on kibana to become available ...")
+        sleep(1)
+        ctr += 1
+
+    ctxt = {
+        'monitoring_kibana_host_port': kibana_host_port,
+        'monitoring_elastic_user_password': elastic_user_password,
+        'monitoring_es_servers': monitoring_es_servers,
+    }
+
+    # Render the metricbeat config, enable the elasticsearch module
+    # enable the systemd service, start the service, setup the dashboards.
+    render('metricbeat.yml.j2', '/etc/metricbeat/metricbeat.yml', ctxt)
+
+    sp.call(["metricbeat", "modules", "enable", "elasticsearch"])
+
+    sp.call(['systemctl', 'daemon-reload'])
+
+    sp.call(["systemctl", "enable", "metricbeat.service"])
+
+    if is_leader():
+        sp.call(["metricbeat", "setup", "--dashboards"])
+
+    # Render the filebeat config, enable the elasticsearch module,
+    # enable the systemd service and setup the dashboards.
+    render('filebeat.yml.j2', '/etc/filebeat/filebeat.yml', ctxt)
+
+    sp.call(["filebeat", "modules", "enable", "elasticsearch"])
+
+    sp.call(['systemctl', 'daemon-reload'])
+
+    sp.call(['systemctl', 'enable', 'filebeat.service'])
+
+    if is_leader():
+        sp.call(["filebeat", "setup"])
+
+    set_flag('elasticsearch.external.monitoring.cluster.configured')
+    es_active_status()
+
+
+@when('elasticsearch.external.monitoring.cluster.configured')
+@when_not('elasticsearch.beats.available')
+def ensure_beats_are_running():
+    status_set(
+        'maintenance', f'ensuring beats are fully started'
+    )
+    for beat in ['filebeat', 'metricbeat']:
+        if start_restart_systemd_service(beat):
+            status_set(
+                'active', f'{beat} has initially started'
+            )
+
+            ctr = 0
+            beat_record = 0
+
+            while True:
+                if ctr == 100:
+                    status_set(
+                        'blocked',
+                        f'{beat} not starting - please debug'
+                    )
+                    return
+                if beat_record == 10:
+                    status_set('active', f'{beat} started')
+                    set_flag(f'elasticsearch.{beat}.available')
+                    break
+
+                status_set(
+                    'maintenance',
+                    f'ensuring {beat} has fully started'
+                )
+
+                if service_running(beat):
+                    beat_record += 1
+                else:
+                    start_restart_systemd_service(beat)
+                    beat_record = 0
+
+                ctr += 1
+                sleep(1)
+
+    if is_flag_set('elasticsearch.filebeat.available') and\
+            is_flag_set('elasticsearch.metricbeat.available'):
+        set_flag(f'elasticsearch.beats.available')
+    es_active_status()
 
 
 # Master Node Relation
-# @when('endpoint.provide-master.joined')
-# def provide_master_node_type_relation_data():
-#    if not ES_NODE_TYPE == 'master':
-#        log('SOMETHING BAD IS HAPPENING - wronge node type for relation')
-#        status_set(
-#            'blocked',
-#            'Cannot make relation to master - wrong node-type for relation'
-#        )
-#        return
-#    else:
-#        endpoint_from_flag('endpoint.provide-master.joined').configure(
-#            ES_CLUSTER_INGRESS_ADDRESS,
-#            ES_TRANSPORT_PORT,
-#            ES_CLUSTER_NAME
-#        )
-#
-#
+@when('endpoint.provide-master.joined')
+def provide_master_node_type_relation_data():
+    if not ES_NODE_TYPE == 'master':
+        log('SOMETHING BAD IS HAPPENING - wronge node type for relation')
+        status_set(
+            'blocked',
+            'Cannot make relation to master - wrong node-type for relation'
+        )
+        return
+    else:
+        endpoint_from_flag('endpoint.provide-master.joined').configure(
+            ES_CLUSTER_INGRESS_ADDRESS,
+            ES_TRANSPORT_PORT,
+            ES_CLUSTER_NAME
+        )
 
 
 # Client Relation
@@ -706,6 +930,11 @@ def provide_client_relation_data():
 
     (only 'master' or 'all' type nodes should run this code)
     '''
+
+    status_set(
+        'maintenance',
+        'Client relation joined, sending elasticsearch cluster data to client.'
+    )
 
     if ES_NODE_TYPE not in ['master', 'all']:
         log('SOMETHING BAD IS HAPPENING - wronge nodetype for client relation')
@@ -724,14 +953,24 @@ def provide_client_relation_data():
         es_active_status()
 
 
+# Non-Master Node Relation
+@when('endpoint.require-master.available')
+def get_all_master_nodes():
+    master_nodes = []
+    endpoint = endpoint_from_flag('endpoint.require-master.available')
+
+    for es in endpoint.list_unit_data():
+        master_nodes.append('{}:{}'.format(es['host'], es['port']))
+
+    kv.set('master-nodes', master_nodes)
+
+    set_flag('render.elasticsearch.unicast-hosts')
+    set_flag('elasticsearch.master.acquired')
+
+
 @when('config.changed.custom-config',
       'final.sanity.check.complete')
 def render_custom_config_on_config_changed():
     render_elasticsearch_yml()
-    if restart_elasticsearch():
+    if start_restart_systemd_service('elasticsearch'):
         status_set('active', "Success changing config")
-
-
-@hook('upgrade-charm')
-def upgrade_charm_ops():
-    application_version_set(elasticsearch_version())

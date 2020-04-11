@@ -18,11 +18,19 @@ series:
 - bionic
 subordinate: false
 requires:
+  kibana-host-port:
+    interface: "host-port"
   require-master:
     interface: "elasticsearch"
+  monitoring-credentials:
+    interface: "elasticsearch-user-credentials"
+  monitoring-hosts:
+    interface: "elasticsearch"
 provides:
-  kibana:
-    interface: "kibana"
+  kibana-credentials:
+    interface: "elasticsearch-user-credentials"
+  elastic-credentials:
+    interface: "elasticsearch-user-credentials"
   client:
     interface: "elasticsearch"
   provide-master:
