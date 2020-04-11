@@ -1,0 +1,13 @@
+#!/usr/local/sbin/charm-env python3
+from subprocess import PIPE, Popen
+from charmhelpers.core.hookenv import action_set, is_leader
+
+import charms.leadership
+
+
+if __name__ == "__main__":
+    action_set(
+        {
+            'elasticsearch.system.users': charms.leadership.leader_get('users')
+        }
+    )

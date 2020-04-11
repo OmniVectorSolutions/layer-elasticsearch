@@ -1,0 +1,4 @@
+get-system-user-info:
+  description: Retrieve elasticsearch system users username and password.
+get-cert-password:
+  description: Retrieve elasticsearch cert password.

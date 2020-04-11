@@ -1,7 +1,7 @@
 name: elasticsearch
 display-name: Elasticsearch
 summary: Open Source, Distributed, RESTful Search Engine
-maintainer: James Beedy <jamesbeedy@gmail.com>
+maintainer: Omnivector Solutions <admin@omnivector.solutions>
 description: |
   Elasticsearch is a search server based on Lucene. It provides a
   distributed, multitenant-capable full-text search engine with a
@@ -15,13 +15,22 @@ tags:
   - elastic
   - omnivector
 series:
-- xenial
 - bionic
 subordinate: false
 requires:
+  kibana-host-port:
+    interface: "host-port"
   require-master:
     interface: "elasticsearch"
+  monitoring-credentials:
+    interface: "elasticsearch-user-credentials"
+  monitoring-hosts:
+    interface: "elasticsearch"
 provides:
+  kibana-credentials:
+    interface: "elasticsearch-user-credentials"
+  elastic-credentials:
+    interface: "elasticsearch-user-credentials"
   client:
     interface: "elasticsearch"
   provide-master:
@@ -32,7 +41,7 @@ peers:
 extra-bindings:
   public:
   cluster:
-storage:
-  data:
-    type: filesystem
-    location: /srv/elasticsearch-data
+#storage:
+#  data:
+#    type: filesystem
+#    location: /srv/elasticsearch-data

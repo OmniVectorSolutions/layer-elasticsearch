@@ -4,6 +4,7 @@ import json
 import os
 import requests
 import shutil
+import subprocess as sp
 
 from pathlib import Path
 from time import sleep
@@ -44,8 +45,6 @@ ES_PATH_CONF = Path('/etc/elasticsearch')
 
 ES_YML_PATH = ES_PATH_CONF / 'elasticsearch.yml'
 
-DISCOVERY_FILE_PATH = ES_PATH_CONF / 'discovery-file' / 'unicast_hosts.txt'
-
 ES_PLUGIN = ES_HOME_DIR / 'bin' / 'elasticsearch-plugin'
 
 ES_SETUP_PASSWORDS = ES_HOME_DIR / 'bin' / 'elasticsearch-setup-passwords'
@@ -65,6 +64,20 @@ ES_CLUSTER_NAME = config('cluster-name')
 ES_HTTP_PORT = 9200
 
 ES_TRANSPORT_PORT = 9300
+
+ES_CERTS_DIR = Path("/etc/elasticsearch/certs")
+
+ES_CA = ES_CERTS_DIR / "ca.p12"
+
+ES_CERTS = ES_CERTS_DIR / "elastic-certificates.p12"
+
+ES_CERT_UTIL = Path('/usr/share/elasticsearch/bin/elasticsearch-certutil')
+
+ES_CA_PASS = "rats"
+
+ES_CERT_PASS = "rats"
+
+ES_KEYSTORE = Path('/usr/share/elasticsearch/bin/elasticsearch-keystore')
 
 CHARM_TEMPLATES = Path(f"{charm_dir()}/templates")
 
@@ -97,7 +110,7 @@ search.remote.connect: false
 """
 
 NODE_TYPE_MAP = {
-    'all': None,
+    'all': "",
     'master': MASTER_NODE_CONFIG,
     'data': DATA_NODE_CONFIG,
     'ingest': INGEST_NODE_CONFIG,
@@ -155,7 +168,7 @@ def elasticsearch_version():
 
 
 def render_elasticsearch_file(
-    template,
+    template_name,
     target,
     ctxt,
     user=None,
@@ -174,19 +187,17 @@ def render_elasticsearch_file(
     # Render template to file
     rendered_template = Environment(
         loader=FileSystemLoader(str(CHARM_TEMPLATES))
-    ).get_template(
-        str(template)
-    ).render(ctxt)
+    ).get_template(template_name).render(ctxt)
 
     target.write_text(rendered_template)
-    shutil.chown(str(target_file), user, group)
+    shutil.chown(str(target), user, group)
 
 
 def elasticsearch_setup_passwords_available():
     """Check elasticsearch-setup-passwords exe is available.
     """
 
-    if os.path.exists(ES_SETUP_PASSWORDS):
+    if ES_SETUP_PASSWORDS.exists():
         return True
     else:
         # If the the elasticsearch-plugin exe doesn't exist we are in trouble,
@@ -194,7 +205,7 @@ def elasticsearch_setup_passwords_available():
         status_set(
             'blocked',
             "Cannot find elasticsearch-setup-passwords exe - "
-            f"please debug {ES_SETUP_PASSWORDS}"
+            f"please debug {str(ES_SETUP_PASSWORDS)}"
         )
         log("BAD THINGS - elasticsearch-setup-passwords not available")
         return False
@@ -204,7 +215,7 @@ def elasticsearch_plugin_available():
     """Check elasticsearch-plugin exe is available.
     """
 
-    if os.path.exists(ES_PLUGIN):
+    if ES_PLUGIN.exists():
         return True
     else:
         # If the the elasticsearch-plugin exe doesn't exist we are in trouble,
@@ -212,34 +223,35 @@ def elasticsearch_plugin_available():
         status_set(
             'blocked',
             "Cannot find elasticsearch plugin manager - "
-            f"please debug {ES_PLUGIN}"
+            f"please debug {str(ES_PLUGIN)}"
         )
         log("BAD THINGS - elasticsearch-plugin not available")
         return False
 
 
-def restart_elasticsearch():
-    # If elasticsearch isn't running start it
-    if not service_running('elasticsearch'):
-        service_start('elasticsearch')
-    # If elasticsearch is running restart it
-    else:
-        service_restart('elasticsearch')
-    # Wait 100 seconds for elasticsearch to restart, then break out of the loop
-    # and blocked wil be set below
+def start_restart_systemd_service(systemd_service):
+    start_restart(systemd_service)
+
+    # Wait 100 seconds for service to start, then break out of the loop
+    # and set blocked status.
     cnt = 0
-    while not service_running('elasticsearch') and cnt < 100:
-        status_set('waiting', 'Waiting for Elasticsearch to start')
+    while not service_running(systemd_service) and cnt < 100:
+        status_set('waiting', f'Waiting for {systemd_service} to start')
         sleep(1)
         cnt += 1
 
-    if service_running('elasticsearch'):
-        status_set('active', 'Elasticsearch init running')
+    if service_running(systemd_service):
+        status_set('active', f'{systemd_service} running')
     else:
         # If elasticsearch wont start, set blocked
         status_set(
             'blocked',
-            'There are problems with elasticsearch, please debug'
+            f'There are problems with {systemd_service}, please debug'
         )
         return False
+
     return True
+
+
+def elasticsearch_exec_cmd(cmd):
+    sp.call(["sudo", "-H", "-u", "elasticsearch", "bash", "-c", cmd])
