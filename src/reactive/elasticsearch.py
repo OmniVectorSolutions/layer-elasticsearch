@@ -249,16 +249,26 @@ def check_for_and_mount_direct_attached_storage():
             [
                 'mount',
                 str(direct_attached_device),
-                '/etc/elasticsearch-data'
+                str(ES_DATA_DIR)
             ]
         )
+
+        chownr(
+            path=str(ES_DATA_DIR),
+            owner='elasticsearch',
+            group='elasticsearch',
+            follow_links=True,
+            chowntopdir=True
+        )
+
         with open('/etc/fstab', 'a') as f:
             f.write(
                 (
-                    '/dev/nvme0n1 /srv/elasticsearch-data '
+                    f'/dev/nvme0n1 {str(ES_DATA_DIR)} '
                     'ext4 defaults,nofail 0 2'
                 )
             )
+
     set_flag('direct.attached.storage.check.complete')
 
 
