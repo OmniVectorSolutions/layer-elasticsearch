@@ -4,6 +4,7 @@ import json
 import os
 import requests
 import shutil
+import string
 import subprocess as sp
 
 from random import choice

@@ -2,15 +2,11 @@
 import json
 import os
 import requests
-import string
 
 import subprocess as sp
 
-from base64 import b64encode, b64decode
 from pathlib import Path
 from time import sleep
-
-from requests.auth import HTTPBasicAuth
 
 from charms.reactive import (
     clear_flag,
@@ -20,7 +16,6 @@ from charms.reactive import (
     when,
     when_any,
     when_not,
-    hook,
 )
 
 from charmhelpers.core.templating import (
@@ -28,57 +23,28 @@ from charmhelpers.core.templating import (
 )
 
 from charmhelpers.core.hookenv import (
-    application_version_set,
-    charm_dir,
     config,
     is_leader,
     log,
-    open_port,
     status_set,
 )
 from charmhelpers.core.host import (
-    chownr,
-    is_container,
-    service_restart,
     service_running,
-    service_start,
-    fstab_remove
 )
 
 from charmhelpers.core import unitdata
 
 from charms.layer.elasticsearch import (
     # pylint: disable=E0611,E0401,C0412
-    gen_password,
     es_active_status,
-    elasticsearch_exec_cmd,
-    elasticsearch_plugin_available,
-    elasticsearch_version,
     render_elasticsearch_file,
     start_restart_systemd_service,
-    ES_DATA_DIR,
-    ES_DEFAULT_FILE_PATH,
-    ES_PATH_CONF,
-    ES_YML_PATH,
     ES_PUBLIC_INGRESS_ADDRESS,
     ES_CLUSTER_INGRESS_ADDRESS,
     ES_CLUSTER_NAME,
     ES_NODE_TYPE,
     ES_HTTP_PORT,
-    ES_KEYSTORE,
     ES_TRANSPORT_PORT,
-    ES_PLUGIN,
-    ES_SETUP_PASSWORDS,
-    ES_CERTS_DIR,
-    ES_CA,
-    ES_CERTS,
-    ES_CERT_UTIL,
-    ES_CA_PASS,
-    ES_CERT_PASS,
-    JAVA_HOME,
-    JVM_OPTIONS,
-    NODE_TYPE_MAP,
-    PIP,
 )
 
 import charms.leadership
@@ -92,7 +58,9 @@ def set_active_status():
     es_active_status()
 
 
-@when('endpoint.member.joined')
+@when(
+    'endpoint.member.joined',
+)
 def update_unitdata_kv():
     """
     This handler is ran whenever a peer is joined.
@@ -133,9 +101,11 @@ def update_discovery_file():
 
 
 # Node-Type Tribe/Ingest/Data Handlers
-@when_any('elasticsearch.coordinating',
-          'elasticsearch.ingest',
-          'elasticsearch.data')
+@when_any(
+    'elasticsearch.coordinating',
+    'elasticsearch.ingest',
+    'elasticsearch.data'
+)
 @when_not('elasticsearch.master.acquired')
 def block_until_master_relation():
     '''

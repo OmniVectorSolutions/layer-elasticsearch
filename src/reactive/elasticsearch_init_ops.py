@@ -1,15 +1,79 @@
+import json
 import os
+import requests
 import subprocess as sp
 
-from charms.reactive import set_flag, when, when_not, hook
+from base64 import b64encode, b64decode
+from pathlib import Path
+from requests.auth import HTTPBasicAuth
+from time import sleep
 
 import charms.leadership
 
-from charmhelpers.core.host import is_container, fstab_remove
-from charmhelpers.core.hookenv import open_port
+from charms.reactive import (
+    hook,
+    is_flag_set,
+    set_flag,
+    when,
+    when_not,
+    when_any,
+)
 
+from charmhelpers.core import (
+    unitdata,
+)
+
+from charmhelpers.core.host import (
+    chownr,
+    fstab_remove,
+    is_container,
+)
+
+from charmhelpers.core.hookenv import (
+    application_version_set,
+    config,
+    charm_dir,
+    is_leader,
+    open_port,
+    status_set,
+)
+
+from charms.layer.elasticsearch import (
+    es_active_status,
+    elasticsearch_version,
+    elasticsearch_plugin_available,
+    elasticsearch_exec_cmd,
+    gen_password,
+    render_elasticsearch_yml,
+    render_elasticsearch_file,
+    start_restart_systemd_service,
+    ES_DATA_DIR,
+    ES_NODE_TYPE,
+    ES_CLUSTER_INGRESS_ADDRESS,
+    ES_HTTP_PORT,
+    ES_TRANSPORT_PORT,
+    ES_DEFAULT_FILE_PATH,
+    ES_CERT_UTIL,
+    ES_CA,
+    ES_PATH_CONF,
+    ES_CERTS_DIR,
+    ES_CERTS,
+    ES_PLUGIN,
+    ES_SETUP_PASSWORDS,
+    JAVA_HOME,
+    PIP,
+)
+
+
+kv = unitdata.kv()
 
 set_flag('elasticsearch.{}'.format(ES_NODE_TYPE))
+
+
+if config('xpack-security-enabled'):
+    set_flag('xpack.security.enabled')
+else:
+    set_flag('xpack.security.disabled')
 
 
 @when('leadership.is_leader')
@@ -18,13 +82,15 @@ def set_leader_ip_as_master():
     charms.leadership.leader_set(master_ip=ES_CLUSTER_INGRESS_ADDRESS)
 
 
-@when('leadership.is_leader')
+@when('leadership.is_leader',
+      'xpack.security.enabled')
 @when_not('leadership.set.ca_password')
 def gen_ca_password():
     charms.leadership.leader_set(ca_password=gen_password())
 
 
-@when('leadership.is_leader')
+@when('leadership.is_leader',
+      'xpack.security.enabled')
 @when_not('leadership.set.cert_password')
 def gen_cert_password():
     charms.leadership.leader_set(cert_password=gen_password())
@@ -54,7 +120,7 @@ def remove_swap():
 def set_elasticsearch_started_flag():
     '''
     This flag is used to gate against certain
-    charm code runnig until the start state has been reached.
+    charm code runnig until the start flag has been set.
     '''
     set_flag('elasticsearch.juju.started')
 
@@ -161,13 +227,15 @@ def render_elasticsearch_defaults():
     status_set('active', 'Elasticsearch defaults available')
 
 
-@when('elasticsearch.defaults.available',
-      'elasticsearch.ports.available',
-      'elasticsearch.juju.started',
-      'direct.attached.storage.check.complete',
-      'container.check.complete',
-      'leadership.set.master_ip',
-      'swap.removed')
+@when(
+    'elasticsearch.defaults.available',
+    'elasticsearch.ports.available',
+    'elasticsearch.juju.started',
+    'direct.attached.storage.check.complete',
+    'container.check.complete',
+    'leadership.set.master_ip',
+    'swap.removed',
+)
 @when_not('elasticsearch.init.running')
 def render_bootstrap_config():
     '''Render the bootstrap elasticsearch.yml and restart.
@@ -218,11 +286,15 @@ def install_elasticsearch_pip_dep():
     set_flag('pip.elasticsearch.installed')
 
 
-@when('elasticsearch.version.set')
+@when(
+    'elasticsearch.version.set',
+    'xpack.security.enabled',
+)
 @when_not('cert.dir.available')
 def create_certs_dir():
     if not ES_CERTS_DIR.exists():
         ES_CERTS_DIR.mkdir()
+
     chownr(
         path=str(ES_CERTS_DIR),
         owner='elasticsearch',
@@ -233,10 +305,13 @@ def create_certs_dir():
     set_flag('cert.dir.available')
 
 
-@when('leadership.is_leader',
-      'leadership.set.ca_password',
-      'elasticsearch.init.running',
-      'cert.dir.available')
+@when(
+    'leadership.is_leader',
+    'leadership.set.ca_password',
+    'elasticsearch.init.running',
+    'xpack.security.enabled',
+    'cert.dir.available'
+)
 @when_not('elasticsearch.ca.available')
 def provision_elasticsearch_local_ca():
     ca_pass = charms.leadership.leader_get('ca_password')
@@ -251,10 +326,13 @@ def provision_elasticsearch_local_ca():
     set_flag('elasticsearch.ca.available')
 
 
-@when('leadership.is_leader',
-      'leadership.set.cert_password',
-      'leadership.set.ca_password',
-      'elasticsearch.ca.available')
+@when(
+    'xpack.security.enabled',
+    'leadership.is_leader',
+    'leadership.set.cert_password',
+    'leadership.set.ca_password',
+    'elasticsearch.ca.available',
+)
 @when_not('leadership.set.elasticsearch_certs')
 def provision_elasticsearch_certs():
     """Generate certificate password
@@ -276,9 +354,12 @@ def provision_elasticsearch_certs():
     )
 
 
-@when('elastic.base.available',
-      'leadership.set.cert_password',
-      'leadership.set.elasticsearch_certs')
+@when(
+    'xpack.security.enabled',
+    'elastic.base.available',
+    'leadership.set.cert_password',
+    'leadership.set.elasticsearch_certs',
+)
 @when_not('elasticsearch.keystore.available')
 def init_elasticsearch_keystore():
     """Create the keystore
@@ -291,9 +372,12 @@ def init_elasticsearch_keystore():
     set_flag('elasticsearch.keystore.available')
 
 
-@when('elasticsearch.keystore.available',
-      'leadership.set.cert_password',
-      'leadership.set.elasticsearch_certs')
+@when(
+    'xpack.security.enabled',
+    'elasticsearch.keystore.available',
+    'leadership.set.cert_password',
+    'leadership.set.elasticsearch_certs'
+)
 @when_not('elasticsearch.ssl.keystore.available')
 def init_ssl_keystore():
     """Init keystore with transport ssl key
@@ -366,8 +450,11 @@ def set_plugins_available():
     set_flag('elasticsearch.plugins.available')
 
 
-@when('cert.dir.available',
-      'leadership.set.elasticsearch_certs')
+@when(
+    'xpack.security.enabled',
+    'cert.dir.available',
+    'leadership.set.elasticsearch_certs',
+)
 @when_not('elasticsearch.certs.provisioned')
 def provision_certs_all_nodes():
     certs = charms.leadership.leader_get('elasticsearch_certs')
@@ -382,11 +469,17 @@ def provision_certs_all_nodes():
     set_flag('elasticsearch.certs.provisioned')
 
 
-@when('elasticsearch.init.running',
-      'elasticsearch.ssl.keystore.available',
-      'elasticsearch.certs.provisioned',
-      'elasticsearch.plugins.available')
-@when_not('elasticsearch.bootstrapped')
+@when_any(
+    'elasticsearch.certs.provisioned',
+    'xpack.security.disabled',
+)
+@when(
+    'elasticsearch.version.set',
+    'elastic.base.available'
+)
+@when_not(
+    'elasticsearch.bootstrapped'
+)
 def render_config_post_bootstrap_init():
     '''Render the bootstrap elasticsearch.yml and restart.
     '''
@@ -405,7 +498,7 @@ def set_node_type_available_flag():
 
 
 @when(f'elasticsearch.{ES_NODE_TYPE}.available')
-@when_not('xpack.security.check.complete')
+@when_not('xpack.user.setup.check.complete')
 def check_for_and_configure_xpack_security():
     master_or_all = \
         is_flag_set('elasticsearch.master') or is_flag_set('elasticsearch.all')
@@ -427,12 +520,15 @@ def check_for_and_configure_xpack_security():
                 password = line.split()[3]
                 users[user] = password
         charms.leadership.leader_set(users=json.dumps(users))
-    status_set('active', "security check complete")
-    set_flag('xpack.security.check.complete')
+    status_set('active', "xpack user setup check complete")
+    set_flag('xpack.user.setup.check.complete')
 
 
-@when('leadership.set.users',
-      'xpack.security.check.complete')
+@when_any(
+    'leadership.set.users',
+    'xpack.security.disabled',
+)
+@when('xpack.user.setup.check.complete')
 @when_not('elasticsearch.init.ops.complete')
 def final_sanity_check():
     if config('xpack-security-enabled'):
