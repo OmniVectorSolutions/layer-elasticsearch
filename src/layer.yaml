@@ -2,6 +2,8 @@ includes:
   - 'layer:basic'
   - 'layer:elastic-base'
   - 'layer:leadership'
+  - 'interface:elasticsearch-users'
+  - 'interface:elasticsearch-cert-data'
   - 'interface:elasticsearch'
   - 'interface:elasticsearch-user-credentials'
   - 'interface:host-port'
