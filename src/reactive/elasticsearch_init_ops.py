@@ -90,6 +90,10 @@ def set_leader_ip_as_master():
     'leadership.is_leader',
     'xpack.security.enabled',
 )
+@when_any(
+    'elasticsearch.master',
+    'elasticsesarch.all',
+)
 @when_not(
     'leadership.set.ca_password',
 )
@@ -100,6 +104,10 @@ def gen_ca_password():
 @when(
     'leadership.is_leader',
     'xpack.security.enabled',
+)
+@when_any(
+    'elasticsearch.master',
+    'elasticsesarch.all',
 )
 @when_not(
     'leadership.set.cert_password',
