@@ -382,9 +382,145 @@ def provide_master_node_type_relation_data():
         )
 
 
+@when(
+    'endpoint.provide-cert-data.joined',
+    'leadership.set.cert_password',
+    'leadership.set.elasticsearch_certs',
+)
+def provide_cert_data():
+    if not ES_NODE_TYPE == 'master':
+        log('SOMETHING BAD IS HAPPENING - wronge node type for relation')
+        status_set(
+            'blocked',
+            'Only the master can provide cert data. Wrong node-type for relation'
+        )
+        return
+    else:
+
+        endpoint_from_flag('endpoint.provide-cert-data.joined').configure(
+            charms.leadership.leader_get('cert_password'),
+            charms.leadership.leader_get('elasticsearch_certs'),
+        )
+
+
+@when(
+    'endpoint.require-elasticsearch-users.available',
+    'leadership.is_leader',
+)
+@when_not(
+    'leadership.set.cert_password',
+    'leadership.set.elasticsearch_certs',
+)
+def receive_elasticsearch_users():
+    if ES_NODE_TYPE == 'master':
+        log('SOMETHING BAD IS HAPPENING - wronge node type for relation')
+        status_set(
+            'blocked',
+            ('Only the master type nodes can provide elasticsearch user data. '
+            'Wrong node-type for relation.')
+        )
+        return
+    else:
+        endpoint = \
+            endpoint_from_flag('endpoint.require-elasticsearch-users.available')
+
+        charms.leadership.leader_set(
+            users=endpoint.list_unit_data()[0]['users']
+        )
+
+
+@when(
+    'leadership.is_leader',
+    'leadership.set.users',
+    'xpack.security.enabled',
+    'endpoint.provide-elasticsearch-users.joined',
+    f'elasticsearch.{ES_NODE_TYPE}.available',
+)
+def provide_elasticsearch_users():
+    '''
+    Send elasticsearch users to requires side of the relationship.
+
+    (only 'master' or type nodes should run this code)
+    '''
+
+    status_set(
+        'maintenance',
+        'provide-elasticsearch-users joined, sending elasticsearch user data.'
+    )
+
+    if not ES_NODE_TYPE == 'master':
+        log('SOMETHING BAD IS HAPPENING - wronge nodetype for client relation')
+        status_set(
+            'blocked',
+            'Cannot make this relation if non master node-type.'
+        )
+        return
+    else:
+        endpoint = endpoint_from_flag(
+            'endpoint.provide-elasticsearch-users.joined'
+        )
+        endpoint.configure(
+            charms.leadership.leader_get('users')
+        )
+        es_active_status()
+
+
+@when(
+    'endpoint.provide-cert-data.available',
+    'leadership.is_leader',
+)
+@when_not(
+    'leadership.set.cert_password',
+    'leadership.set.elasticsearch_certs',
+)
+def receive_cert_data():
+    if ES_NODE_TYPE == 'master':
+        log('SOMETHING BAD IS HAPPENING - wronge node type for relation')
+        status_set(
+            'blocked',
+            (
+                'Only the master type nodes can provide cert data. '
+                'Wrong node-type for relation.'
+            )
+        )
+        return
+    else:
+        endpoint = \
+            endpoint_from_flag('endpoint.provide-cert-data.available')
+        cert_password = \
+            endpoint.list_unit_data()[0]['cert_password']
+        elasticsearch_certs = \
+            endpoint.list_unit_data()[0]['elasticsearch_certs']
+
+        charms.leadership.leader_set(cert_password=cert_password)
+        charms.leadership.leader_set(elasticsearch_certs=elasticsearch_certs)
+
+
+# Master Node Relation
+@when(
+    'endpoint.provide-master.joined',
+)
+def provide_master_node_type_relation_data():
+    if not ES_NODE_TYPE == 'master':
+        log('SOMETHING BAD IS HAPPENING - wronge node type for relation')
+        status_set(
+            'blocked',
+            'Cannot make relation to master - wrong node-type for relation'
+        )
+        return
+    else:
+        endpoint_from_flag('endpoint.provide-master.joined').configure(
+            ES_CLUSTER_INGRESS_ADDRESS,
+            ES_TRANSPORT_PORT,
+            ES_CLUSTER_NAME
+        )
+
+
 # Client Relation
-@when('endpoint.client.joined',
-      f'elasticsearch.{ES_NODE_TYPE}.available')
+@when(
+    'endpoint.client.joined',
+    f'elasticsearch.{ES_NODE_TYPE}.available',
+)
 def provide_client_relation_data():
     '''
     Set client relation data.

@@ -18,26 +18,49 @@ series:
 - bionic
 subordinate: false
 requires:
+
+  require-elasticsearch-users:
+    interface: "elasticsearch-users"
+
+  require-elasticsearch-cert-data:
+    interface: "elasticsearch-cert-data"
+
   kibana-host-port:
     interface: "host-port"
+ 
   require-master:
     interface: "elasticsearch"
+
   monitoring-credentials:
     interface: "elasticsearch-user-credentials"
+
   monitoring-hosts:
     interface: "elasticsearch"
+
 provides:
+
+  provide-elasticsearch-users:
+    interface: "elasticsearch-users"
+
+  require-elasticsearch-cert-data:
+    interface: "elasticsearch-cert-data"
+
   kibana-credentials:
     interface: "elasticsearch-user-credentials"
+
   elastic-credentials:
     interface: "elasticsearch-user-credentials"
+
   client:
     interface: "elasticsearch"
+
   provide-master:
     interface: "elasticsearch"
+
 peers:
   member:
     interface: "elasticsearch"
+
 extra-bindings:
   public:
   cluster:

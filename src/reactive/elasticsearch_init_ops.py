@@ -76,27 +76,41 @@ else:
     set_flag('xpack.security.disabled')
 
 
-@when('leadership.is_leader')
-@when_not('leadership.set.master_ip')
+@when(
+    'leadership.is_leader',
+)
+@when_not(
+    'leadership.set.master_ip',
+)
 def set_leader_ip_as_master():
     charms.leadership.leader_set(master_ip=ES_CLUSTER_INGRESS_ADDRESS)
 
 
-@when('leadership.is_leader',
-      'xpack.security.enabled')
-@when_not('leadership.set.ca_password')
+@when(
+    'leadership.is_leader',
+    'xpack.security.enabled',
+)
+@when_not(
+    'leadership.set.ca_password',
+)
 def gen_ca_password():
     charms.leadership.leader_set(ca_password=gen_password())
 
 
-@when('leadership.is_leader',
-      'xpack.security.enabled')
-@when_not('leadership.set.cert_password')
+@when(
+    'leadership.is_leader',
+    'xpack.security.enabled',
+)
+@when_not(
+    'leadership.set.cert_password',
+)
 def gen_cert_password():
     charms.leadership.leader_set(cert_password=gen_password())
 
 
-@when_not('container.check.complete')
+@when_not(
+    'container.check.complete',
+)
 def confiugre_vm_max_heap():
     bootstrap_memory_lock = 'bootstrap.memory_lock: false'
     if is_container():
@@ -106,7 +120,9 @@ def confiugre_vm_max_heap():
     set_flag('container.check.complete')
 
 
-@when_not('swap.removed')
+@when_not(
+    'swap.removed',
+)
 def remove_swap():
     '''
     Prevent swap
@@ -125,8 +141,12 @@ def set_elasticsearch_started_flag():
     set_flag('elasticsearch.juju.started')
 
 
-@when('elastic.base.available')
-@when_not('elasticsearch.storage.dir.prepared')
+@when(
+    'elastic.base.available',
+)
+@when_not(
+    'elasticsearch.storage.dir.prepared',
+)
 def prepare_es_data_dir():
     '''
     Create (if not exists) and set perms on elasticsearch data dir.
@@ -151,8 +171,12 @@ def prepare_es_data_dir():
 #    set_flag('elasticsearch.storage.available')
 
 
-@when('elasticsearch.storage.dir.prepared')
-@when_not('direct.attached.storage.check.complete')
+@when(
+    'elasticsearch.storage.dir.prepared',
+)
+@when_not(
+    'direct.attached.storage.check.complete',
+)
 def check_for_and_mount_direct_attached_storage():
     direct_attached_device = Path('/dev/nvme0n1')
     if direct_attached_device.exists():
@@ -189,8 +213,12 @@ def check_for_and_mount_direct_attached_storage():
     set_flag('direct.attached.storage.check.complete')
 
 
-@when('elastic.base.available')
-@when_not('elasticsearch.ports.available')
+@when(
+    'elastic.base.available',
+)
+@when_not(
+    'elasticsearch.ports.available',
+)
 def open_ports():
     '''
     Open port 9200 and 9300
@@ -200,8 +228,12 @@ def open_ports():
     set_flag('elasticsearch.ports.available')
 
 
-@when('elastic.base.available')
-@when_not('elasticsearch.defaults.available')
+@when(
+    'elastic.base.available',
+)
+@when_not(
+    'elasticsearch.defaults.available',
+)
 def render_elasticsearch_defaults():
     '''
     Renders /etc/default/elasticsearch
@@ -236,7 +268,9 @@ def render_elasticsearch_defaults():
     'leadership.set.master_ip',
     'swap.removed',
 )
-@when_not('elasticsearch.init.running')
+@when_not(
+    'elasticsearch.init.running',
+)
 def render_bootstrap_config():
     '''Render the bootstrap elasticsearch.yml and restart.
     '''
@@ -265,8 +299,12 @@ def render_bootstrap_config():
         set_flag('elasticsearch.init.running')
 
 
-@when_not('elasticsearch.version.set')
-@when('elasticsearch.init.running')
+@when(
+    'elasticsearch.init.running',
+)
+@when_not(
+    'elasticsearch.version.set',
+)
 def get_set_elasticsearch_version():
     '''
     Set Elasticsearch version.
@@ -277,8 +315,12 @@ def get_set_elasticsearch_version():
     set_flag('elasticsearch.version.set')
 
 
-@when('elasticsearch.version.set')
-@when_not('pip.elasticsearch.installed')
+@when(
+    'elasticsearch.version.set',
+)
+@when_not(
+    'pip.elasticsearch.installed',
+)
 def install_elasticsearch_pip_dep():
     status_set('maintenance', 'Installing Elasticsearch python client.')
     sp.call([PIP, 'install', f'elasticsearch=={elasticsearch_version()[0]}'])
@@ -290,7 +332,9 @@ def install_elasticsearch_pip_dep():
     'elasticsearch.version.set',
     'xpack.security.enabled',
 )
-@when_not('cert.dir.available')
+@when_not(
+    'cert.dir.available',
+)
 def create_certs_dir():
     if not ES_CERTS_DIR.exists():
         ES_CERTS_DIR.mkdir()
@@ -306,13 +350,16 @@ def create_certs_dir():
 
 
 @when(
+    'elasticsearch.master'
     'leadership.is_leader',
     'leadership.set.ca_password',
     'elasticsearch.init.running',
     'xpack.security.enabled',
     'cert.dir.available'
 )
-@when_not('elasticsearch.ca.available')
+@when_not(
+    'elasticsearch.ca.available',
+)
 def provision_elasticsearch_local_ca():
     ca_pass = charms.leadership.leader_get('ca_password')
 
@@ -327,13 +374,16 @@ def provision_elasticsearch_local_ca():
 
 
 @when(
-    'xpack.security.enabled',
+    'elasticsearch.master',
     'leadership.is_leader',
+    'xpack.security.enabled',
     'leadership.set.cert_password',
     'leadership.set.ca_password',
     'elasticsearch.ca.available',
 )
-@when_not('leadership.set.elasticsearch_certs')
+@when_not(
+    'leadership.set.elasticsearch_certs',
+)
 def provision_elasticsearch_certs():
     """Generate certificate password
     """
@@ -354,13 +404,33 @@ def provision_elasticsearch_certs():
     )
 
 
-@when(
-    'xpack.security.enabled',
-    'elastic.base.available',
+@when_any(
+    'elasticsearch.data',
+    'elasticsearch.ingest',
+    'elasticsearch.coordinating',
+)
+@when_not(
     'leadership.set.cert_password',
     'leadership.set.elasticsearch_certs',
 )
-@when_not('elasticsearch.keystore.available')
+@when(
+    'xpack.security.enabled',
+)
+def set_non_master_cert_data_relation_status():
+    status_set(
+        'blocked',
+        ("Need relation to elasticsearch master provide-cert-data interface.")
+    )
+    return
+
+
+@when(
+    'xpack.security.enabled',
+    'elastic.base.available',
+)
+@when_not(
+    'elasticsearch.keystore.available'
+)
 def init_elasticsearch_keystore():
     """Create the keystore
     """
@@ -443,9 +513,13 @@ def install_file_based_discovery_plugin():
     set_flag('elasticsearch.discovery.plugin.available')
 
 
-@when('elasticsearch.repository-s3.plugin.available',
-      'elasticsearch.discovery.plugin.available')
-@when_not('elasticsearch.plugins.available')
+@when(
+    'elasticsearch.repository-s3.plugin.available',
+    'elasticsearch.discovery.plugin.available',
+)
+@when_not(
+    'elasticsearch.plugins.available'
+)
 def set_plugins_available():
     set_flag('elasticsearch.plugins.available')
 
@@ -455,7 +529,9 @@ def set_plugins_available():
     'cert.dir.available',
     'leadership.set.elasticsearch_certs',
 )
-@when_not('elasticsearch.certs.provisioned')
+@when_not(
+    'elasticsearch.certs.provisioned'
+)
 def provision_certs_all_nodes():
     certs = charms.leadership.leader_get('elasticsearch_certs')
     ES_CERTS.write_bytes(b64decode(certs))
@@ -478,7 +554,7 @@ def provision_certs_all_nodes():
     'elastic.base.available'
 )
 @when_not(
-    'elasticsearch.bootstrapped'
+    'elasticsearch.bootstrapped',
 )
 def render_config_post_bootstrap_init():
     '''Render the bootstrap elasticsearch.yml and restart.
@@ -491,14 +567,22 @@ def render_config_post_bootstrap_init():
         set_flag('elasticsearch.bootstrapped')
 
 
-@when('elasticsearch.bootstrapped')
-@when_not(f'elasticsearch.{ES_NODE_TYPE}.available')
+@when(
+    'elasticsearch.bootstrapped',
+)
+@when_not(
+    f'elasticsearch.{ES_NODE_TYPE}.available',
+)
 def set_node_type_available_flag():
     set_flag(f'elasticsearch.{ES_NODE_TYPE}.available')
 
 
-@when(f'elasticsearch.{ES_NODE_TYPE}.available')
-@when_not('xpack.user.setup.check.complete')
+@when(
+    f'elasticsearch.{ES_NODE_TYPE}.available',
+)
+@when_not(
+    'xpack.user.setup.check.complete',
+)
 def check_for_and_configure_xpack_security():
     master_or_all = \
         is_flag_set('elasticsearch.master') or is_flag_set('elasticsearch.all')
@@ -525,11 +609,34 @@ def check_for_and_configure_xpack_security():
 
 
 @when_any(
+    'elasticsearch.data',
+    'elasticsearch.ingest',
+    'elasticsearch.coordinating',
+)
+@when_not(
+    'leadership.set.users',
+)
+@when(
+    'xpack.security.enabled',
+)
+def set_non_master_cert_data_relation_status():
+    status_set(
+        'blocked',
+        ("Need relation to elasticsearch provide-users interface.")
+    )
+    return
+
+
+@when(
+    'xpack.user.setup.check.complete',
+)
+@when_any(
     'leadership.set.users',
     'xpack.security.disabled',
 )
-@when('xpack.user.setup.check.complete')
-@when_not('elasticsearch.init.ops.complete')
+@when_not(
+    'elasticsearch.init.ops.complete',
+)
 def final_sanity_check():
     if config('xpack-security-enabled'):
         users = charms.leadership.leader_get('users')
