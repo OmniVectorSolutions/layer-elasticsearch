@@ -42,7 +42,7 @@ provides:
   provide-elasticsearch-users:
     interface: "elasticsearch-users"
 
-  require-elasticsearch-cert-data:
+  provide-elasticsearch-cert-data:
     interface: "elasticsearch-cert-data"
 
   kibana-credentials:

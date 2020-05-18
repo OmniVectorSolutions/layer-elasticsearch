@@ -64,16 +64,27 @@ from charms.layer.elasticsearch import (
     PIP,
 )
 
+import charms.leadership
+
 
 kv = unitdata.kv()
 
-set_flag('elasticsearch.{}'.format(ES_NODE_TYPE))
+
+@when_not(
+    "elasticsearch.node.checked"
+)
+def set_es_node_type_available():
+    set_flag(f"elasticsearch.{ES_NODE_TYPE}")
+    set_flag("elasticsearch.node.checked")
 
 
-if config('xpack-security-enabled'):
-    set_flag('xpack.security.enabled')
-else:
-    set_flag('xpack.security.disabled')
+@when_not('xpack.checked')
+def check_for_xpack():
+    if config('xpack-security-enabled'):
+        set_flag('xpack.security.enabled')
+    else:
+        set_flag('xpack.security.disabled')
+    set_flag('xpack.checked')
 
 
 @when(
@@ -88,6 +99,8 @@ def set_leader_ip_as_master():
 
 @when(
     'leadership.is_leader',
+    'xpack.checked',
+    'elasticsearch.node.checked',
     'xpack.security.enabled',
 )
 @when_any(
@@ -103,6 +116,8 @@ def gen_ca_password():
 
 @when(
     'leadership.is_leader',
+    'xpack.checked',
+    'elasticsearch.node.checked',
     'xpack.security.enabled',
 )
 @when_any(
@@ -358,12 +373,15 @@ def create_certs_dir():
 
 
 @when(
-    'elasticsearch.master'
     'leadership.is_leader',
     'leadership.set.ca_password',
     'elasticsearch.init.running',
     'xpack.security.enabled',
     'cert.dir.available'
+)
+@when_any(
+    'elasticsearch.master',
+    'elasticsearch.all',
 )
 @when_not(
     'elasticsearch.ca.available',
@@ -382,12 +400,15 @@ def provision_elasticsearch_local_ca():
 
 
 @when(
-    'elasticsearch.master',
     'leadership.is_leader',
     'xpack.security.enabled',
     'leadership.set.cert_password',
     'leadership.set.ca_password',
     'elasticsearch.ca.available',
+)
+@when_any(
+    'elasticsearch.all',
+    'elasticsearch.master',
 )
 @when_not(
     'leadership.set.elasticsearch_certs',
