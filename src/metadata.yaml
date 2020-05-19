@@ -54,8 +54,12 @@ provides:
   client:
     interface: "elasticsearch"
 
-  provide-master:
+  provide-master-to-data:
     interface: "elasticsearch"
+
+  provide-master-to-ingest:
+    interface: "elasticsearch"
+
 
 peers:
   member:

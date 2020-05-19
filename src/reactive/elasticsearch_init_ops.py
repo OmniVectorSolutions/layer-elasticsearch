@@ -70,21 +70,20 @@ import charms.leadership
 kv = unitdata.kv()
 
 
-@when_not(
-    "elasticsearch.node.checked"
-)
-def set_es_node_type_available():
-    set_flag(f"elasticsearch.{ES_NODE_TYPE}")
-    set_flag("elasticsearch.node.checked")
+# General comments
+#
+# 1) This code depends on layer-leadership to set flags in the format
+# 'leadership.set.<varname>' following the setting of <varname> to the leader.
+# Ref https://github.com/stub42/layer-leadership#states
 
 
-@when_not('xpack.checked')
-def check_for_xpack():
-    if config('xpack-security-enabled'):
-        set_flag('xpack.security.enabled')
-    else:
-        set_flag('xpack.security.disabled')
-    set_flag('xpack.checked')
+set_flag(f"elasticsearch.{ES_NODE_TYPE}")
+
+
+if config('xpack-security-enabled'):
+    set_flag('xpack.security.enabled')
+else:
+    set_flag('xpack.security.disabled')
 
 
 @when(
@@ -94,18 +93,18 @@ def check_for_xpack():
     'leadership.set.master_ip',
 )
 def set_leader_ip_as_master():
+    """Set the leader ip in leader datastore.
+    """
     charms.leadership.leader_set(master_ip=ES_CLUSTER_INGRESS_ADDRESS)
 
 
 @when(
     'leadership.is_leader',
-    'xpack.checked',
-    'elasticsearch.node.checked',
     'xpack.security.enabled',
 )
 @when_any(
     'elasticsearch.master',
-    'elasticsesarch.all',
+    'elasticsearch.all',
 )
 @when_not(
     'leadership.set.ca_password',
@@ -116,13 +115,11 @@ def gen_ca_password():
 
 @when(
     'leadership.is_leader',
-    'xpack.checked',
-    'elasticsearch.node.checked',
     'xpack.security.enabled',
 )
 @when_any(
     'elasticsearch.master',
-    'elasticsesarch.all',
+    'elasticsearch.all',
 )
 @when_not(
     'leadership.set.cert_password',
@@ -482,9 +479,20 @@ def init_ssl_keystore():
     """Init keystore with transport ssl key
     """
     cert_pass = charms.leadership.leader_get('cert_password')
-    sp.call(
-        [f"{charm_dir()}/scripts/set_transport_keystore_values.sh", cert_pass]
-    )
+    try:
+        sp.check_call(
+            [
+                f"{charm_dir()}/scripts/set_transport_keystore_values.sh",
+                cert_pass
+            ]
+        )
+    except:
+        status_set(
+            'blocked',
+            "Cannot set_transport_keystore_values, please debug."
+        )
+        return
+
     set_flag('elasticsearch.ssl.keystore.available')
 
 
@@ -585,8 +593,8 @@ def provision_certs_all_nodes():
 @when_not(
     'elasticsearch.bootstrapped',
 )
-def render_config_post_bootstrap_init():
-    '''Render the bootstrap elasticsearch.yml and restart.
+def render_runtime_config_post_bootstrap():
+    '''Render the runtime elasticsearch.yml and restart.
     '''
 
     render_elasticsearch_yml()
@@ -606,6 +614,25 @@ def set_node_type_available_flag():
     set_flag(f'elasticsearch.{ES_NODE_TYPE}.available')
 
 
+#@when_any(
+#    'elasticsearch.data',
+#    'elasticsearch.ingest',
+#    'elasticsearch.coordinating',
+#)
+#@when_not(
+#    'leadership.set.users',
+#)
+#@when(
+#    'xpack.security.enabled',
+#)
+#def set_non_master_cert_data_relation_status():
+#    status_set(
+#        'blocked',
+#        ("Need relation to elasticsearch provide-users interface.")
+#    )
+#    return
+
+
 @when(
     f'elasticsearch.{ES_NODE_TYPE}.available',
 )
@@ -617,6 +644,11 @@ def check_for_and_configure_xpack_security():
         is_flag_set('elasticsearch.master') or is_flag_set('elasticsearch.all')
 
     if is_leader() and master_or_all and config('xpack-security-enabled'):
+
+        if is_flag_set('elasticsearch.master'):
+            if not is_flag_set('elasticsearch.at.least.one.data.node'):
+                status_set('blocked', "Need relation to a data node to continue")
+                return
 
         # Set environment variables needed to run elasticsearch-setup-passwords
         os.environ['ES_PATH_CONF'] = str(ES_PATH_CONF)
@@ -635,25 +667,6 @@ def check_for_and_configure_xpack_security():
         charms.leadership.leader_set(users=json.dumps(users))
     status_set('active', "xpack user setup check complete")
     set_flag('xpack.user.setup.check.complete')
-
-
-@when_any(
-    'elasticsearch.data',
-    'elasticsearch.ingest',
-    'elasticsearch.coordinating',
-)
-@when_not(
-    'leadership.set.users',
-)
-@when(
-    'xpack.security.enabled',
-)
-def set_non_master_cert_data_relation_status():
-    status_set(
-        'blocked',
-        ("Need relation to elasticsearch provide-users interface.")
-    )
-    return
 
 
 @when(
