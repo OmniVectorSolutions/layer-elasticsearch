@@ -1,0 +1,5 @@
+xpack.monitoring.collection.enabled: true
+xpack.monitoring.exporters:
+  id1:
+    type: http
+    host: ["http://172.31.104.172:9200"]

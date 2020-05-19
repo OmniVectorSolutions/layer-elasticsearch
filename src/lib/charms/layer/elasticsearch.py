@@ -4,7 +4,10 @@ import json
 import os
 import requests
 import shutil
+import string
 import subprocess as sp
+
+from random import choice
 
 from pathlib import Path
 from time import sleep
@@ -22,6 +25,7 @@ from charmhelpers.core.hookenv import (
 from charmhelpers.core import unitdata
 
 from charmhelpers.core.host import (
+    is_container,
     service_running,
     service_start,
     service_restart
@@ -119,6 +123,80 @@ NODE_TYPE_MAP = {
 
 
 kv = unitdata.kv()
+
+
+def gen_password():
+    digits_and_letters = string.ascii_letters + string.digits
+    return ''.join(
+        choice(digits_and_letters)
+        for i in range(len(digits_and_letters))
+    )
+
+
+def es_active_status():
+    status_set(
+        'active',
+        'Elasticsearch Running - {} x {} nodes'.format(
+            len(kv.get('peer-nodes', [])) + 1, ES_NODE_TYPE
+        )
+    )
+
+
+def render_elasticsearch_yml(
+    elasticsearch_yml_template=None,
+    extra_ctxt=None
+) -> None:
+    '''
+    Render /etc/elasticsearch/elasticsearch.yml
+    '''
+
+    status_set('maintenance', 'Writing /etc/elasticsearch/elasticsearch.yml')
+
+    ctxt = {
+        'cluster_name': config('cluster-name'),
+        'cluster_network_ip': ES_CLUSTER_INGRESS_ADDRESS,
+        'node_type': NODE_TYPE_MAP[config('node-type')],
+        'custom_config': config('custom-config'),
+        'xpack_security_enabled': 'xpack.security.enabled: {}'.format(
+            'true' if config('xpack-security-enabled') else 'false'
+        )
+    }
+
+    if is_container():
+        ctxt['bootstrap_memory_lock'] = \
+            kv.get('bootstrap_memory_lock')
+        ctxt['discovery_type'] = \
+            kv.get('discovery_type')
+
+    if config('xpack-security-enabled'):
+        ctxt['xpack_security_transport_ssl_enabled'] = (
+            'xpack.security.transport.ssl.enabled: true'
+        )
+        ctxt['xpack_security_transport_ssl_verification_mode'] = (
+            'xpack.security.transport.ssl.verification_mode: certificate'
+        )
+        ctxt['xpack_security_transport_ssl_keystore_path'] = (
+            'xpack.security.transport.ssl.keystore.path: '
+            'certs/elastic-certificates.p12'
+        )
+        ctxt['xpack_security_transport_ssl_truststore_path'] = (
+            'xpack.security.transport.ssl.truststore.path: '
+            'certs/elastic-certificates.p12'
+        )
+
+    if extra_ctxt is not None:
+        ctxt = {**ctxt, **extra_ctxt}
+
+    if elasticsearch_yml_template is None:
+        elasticsearch_yml_tmpl = "elasticsearch.yml.j2"
+    else:
+        elasticsearch_yml_tmpl = elasticsearch_yml_template
+
+    render_elasticsearch_file(
+        template_name=elasticsearch_yml_tmpl,
+        target=ES_YML_PATH,
+        ctxt=ctxt
+    )
 
 
 class ElasticsearchError(Exception):
